@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="odoo_ai_assistant.LocalVisualization">
+        <section class="o_ai_visualization mb-2" t-att-class="{'o_ai_compact': props.payload.kind !== 'mcp_request', 'o_ai_fit': props.payload.table}" aria-label="Local result">
+            <t t-set="payload" t-value="props.payload"/>
+            <t t-if="payload.kind === 'mcp_request'">
+                <h3 class="o_ai_visualization_title" t-esc="payload.summary ? payload.summary.headline : payload.title"/>
+                <p t-if="payload.description &amp;&amp; !payload.summary" class="small text-muted mb-2" t-esc="payload.description"/>
+                <p t-if="payload.state === 'pending'" class="text-warning small">
+                    Preview only. Confirming may run Odoo automation, send notifications or affect related records.
+                    This preview expires at <t t-esc="payload.expires_at"/> UTC.
+                </p>
+                <t t-if="payload.table">
+                    <div class="o_ai_data_scroll" tabindex="0" role="region" aria-label="Local record results">
+                        <table class="table table-sm table-striped w-auto mb-0">
+                            <caption class="caption-top" t-esc="payload.table.title"/>
+                            <thead><tr><th t-foreach="payload.table.columns" t-as="column" t-key="column_index" scope="col" t-esc="column.label"/></tr></thead>
+                            <tbody>
+                                <tr t-foreach="payload.table.rows" t-as="row" t-key="row_index">
+                                    <td t-foreach="payload.table.columns" t-as="column" t-key="column_index" t-esc="cell(row, column.key)"/>
+                                </tr>
+                                <tr t-if="!payload.table.rows.length"><td t-att-colspan="payload.table.columns.length">No matching records found.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="d-flex align-items-center gap-2 mt-2">
+                        <span t-if="payload.table.rows.length" class="small text-muted" role="status">Records <t t-esc="payload.table.offset + 1"/>–<t t-esc="payload.table.offset + payload.table.rows.length"/> of <t t-esc="payload.table.total"/></span>
+                        <div t-if="(payload.table.offset || payload.table.has_more) &amp;&amp; props.onPage" class="btn-group" role="group" aria-label="Record pages">
+                            <button class="btn btn-sm btn-outline-secondary" t-att-disabled="props.busy || !payload.table.offset" t-on-click="() => props.onPage(true)">‹ Previous</button>
+                            <button class="btn btn-sm btn-outline-secondary" t-att-disabled="props.busy || !payload.table.has_more" t-on-click="() => props.onPage(false)">Next ›</button>
+                        </div>
+                    </div>
+                </t>
+                <div t-if="payload.summary" class="o_ai_action_summary mb-2">
+                    <p class="mb-2" t-esc="payload.summary.subject"/>
+                    <ul t-if="payload.summary.targets.length" class="mb-2">
+                        <li t-foreach="payload.summary.targets" t-as="target" t-key="target_index" t-esc="target"/>
+                    </ul>
+                    <div t-foreach="payload.summary.groups" t-as="group" t-key="group_index" class="mb-2">
+                        <strong t-esc="group.title"/>
+                        <dl class="row mb-0">
+                            <t t-foreach="group.items" t-as="item" t-key="item_index">
+                                <dt class="col-sm-4" t-esc="item.label"/>
+                                <dd class="col-sm-8 text-break" t-esc="item.value"/>
+                            </t>
+                        </dl>
+                    </div>
+                </div>
+                <details t-if="payload.summary || payload.table" class="small mt-2">
+                    <summary>Technical details</summary>
+                    <pre class="o_ai_mcp_details mt-2" t-esc="payload.details"/>
+                </details>
+                <pre t-else="" class="o_ai_mcp_details" t-esc="payload.details"/>
+                <img t-foreach="payload.images" t-as="image" t-key="image_index"
+                    class="img-fluid mb-2" alt="Locally retrieved attachment"
+                    t-att-src="'data:' + image.mimeType + ';base64,' + image.data"/>
+                <a t-foreach="payload.links" t-as="link" t-key="link_index"
+                    class="d-block mb-2" t-att-href="link.url" target="_blank" rel="noopener noreferrer" t-esc="link.label"/>
+                <p class="small text-muted my-2" role="status" t-esc="planState"/>
+                <div t-if="payload.state === 'pending'" class="d-flex gap-2 flex-wrap">
+                    <button type="button" class="btn btn-sm btn-primary" t-att-disabled="props.busy"
+                        t-on-click="() => props.onConfirm(payload.request_id)">Confirm action</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" t-att-disabled="props.busy"
+                        t-on-click="() => props.onCancel(payload.request_id)">Cancel</button>
+                </div>
+                <div t-if="payload.sharing_allowed &amp;&amp; props.onShare" class="mt-2">
+                    <p class="small text-warning mb-1">Share this displayed result and any inline attachment content with
+                        <strong t-esc="payload.provider"/> to let AI analyze it or choose the next tool.
+                        No sharing occurs until you approve.</p>
+                    <button type="button" class="btn btn-sm btn-outline-primary" t-att-disabled="props.busy"
+                        t-on-click="() => props.onShare(payload.request_id)">Share and continue</button>
+                </div>
+                <p t-if="payload.state === 'done' &amp;&amp; !payload.sharing_allowed" class="small text-muted mt-2 mb-0">
+                    Result stays inside Odoo. Administrator approval is required for provider sharing.
+                </p>
+            </t>
+            <t t-else="">
+                <h3 class="o_ai_visualization_title" t-esc="payload.title"/>
+                <t t-if="payload.kind === 'chart'">
+                    <div t-if="!chartNotice" class="o_ai_chart" t-att-hidden="!!status.chartError" t-att-style="'height: ' + chartHeight">
+                        <canvas t-ref="chart" role="img" t-att-aria-label="payload.title + ' — ' + payload.value_label + '. Data table below.'"/>
+                    </div>
+                    <p t-if="status.chartError" class="small text-danger" role="alert"><t t-esc="status.chartError"/>. All values are available in the data table below.</p>
+                    <p t-if="chartNotice" class="small text-muted" role="status" t-esc="chartNotice"/>
+                    <p t-if="payload.chart_type === 'scatter'" class="small text-muted mb-2">Each point uses its label position on the horizontal axis.</p>
+                    <div class="o_ai_data_scroll" tabindex="0" role="region" aria-label="Chart data table">
+                        <table class="table table-sm table-striped mb-0">
+                            <caption class="caption-top">Chart data: <t t-esc="payload.title"/></caption>
+                            <thead><tr><th scope="col">Label</th><th scope="col" t-esc="payload.value_label"/></tr></thead>
+                            <tbody>
+                                <tr t-foreach="payload.labels" t-as="label" t-key="label_index">
+                                    <th scope="row" t-esc="label"/>
+                                    <td t-esc="payload.values[label_index]"/>
+                                </tr>
+                                <tr t-if="!payload.labels.length"><td colspan="2">No data available.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </t>
+                <div t-else="" class="o_ai_data_scroll" tabindex="0" role="region" t-att-aria-label="payload.title || 'Local data table'">
+                    <table class="table table-sm table-striped mb-0">
+                        <caption class="visually-hidden" t-esc="payload.title || 'Local data table'"/>
+                        <thead>
+                            <tr><th t-foreach="payload.columns" t-as="column" t-key="column_index" scope="col" t-esc="column.label"/></tr>
+                        </thead>
+                        <tbody>
+                            <tr t-foreach="payload.rows" t-as="row" t-key="row_index">
+                                <td t-foreach="payload.columns" t-as="column" t-key="column_index" t-esc="cell(row, column.key)"/>
+                            </tr>
+                            <tr t-if="!payload.rows.length"><td t-att-colspan="payload.columns.length">No data available.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p t-if="hasRecordCount" class="small text-muted mt-2 mb-0" role="status">Showing <t t-esc="payload.rows.length"/> of <t t-esc="payload.total"/> accessible records.</p>
+                <p t-elif="payload.truncated" class="small text-muted mt-2 mb-0" role="status">Showing the first <t t-esc="(payload.labels || payload.rows).length"/> groups.</p>
+                <div t-if="props.onExport" class="d-flex flex-wrap gap-2 mt-2">
+                    <button type="button" class="btn btn-sm btn-outline-primary" t-att-disabled="props.busy" t-on-click="() => this.exportAs('pdf')"><i class="fa fa-file-pdf-o me-1" aria-hidden="true"/>Export as PDF</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" t-att-disabled="props.busy" t-on-click="() => this.exportAs('xlsx')"><i class="fa fa-file-excel-o me-1" aria-hidden="true"/>Export as Excel</button>
+                </div>
+            </t>
+        </section>
+    </t>
+</templates>

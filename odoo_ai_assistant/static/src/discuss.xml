@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="odoo_ai_assistant.FilterCollapsedDirectMessages" t-inherit="mail.DiscussSidebarCategories.category" t-inherit-mode="extension">
+        <xpath expr="//DiscussSidebarChannel[@t-elif='store.discuss.thread?.in(category.threads)']" position="attributes">
+            <attribute name="t-elif">store.discuss.thread?.in(category.threads) and (isAIVisibleThread?.(store.discuss.thread) ?? true)</attribute>
+        </xpath>
+        <xpath expr="//DiscussSidebarChannel[@t-elif='store.discuss.thread?.parent_channel_id?.in(category.threads)']" position="attributes">
+            <attribute name="t-elif">store.discuss.thread?.parent_channel_id?.in(category.threads) and (isAIVisibleThread?.(store.discuss.thread.parent_channel_id) ?? true)</attribute>
+        </xpath>
+    </t>
+    <t t-name="odoo_ai_assistant.DiscussSidebarButton">
+        <t t-if="state.enabled">
+            <div class="o_ai_sidebar_category o-mail-DiscussSidebarCategory position-relative d-flex align-items-center rounded opacity-trigger-hover ps-1"
+                 t-att-class="{'mx-2 my-1': store.discuss.isSidebarCompact, 'mt-1 ms-4 me-2 pe-1': !store.discuss.isSidebarCompact}">
+                <button class="o-mail-DiscussSidebarCategory-toggler btn btn-link text-reset flex-grow-1 d-flex p-0 text-start"
+                        t-att-class="{'align-items-baseline o-gap-0_5': !store.discuss.isSidebarCompact, 'align-items-center justify-content-center border-0 o-compact gap-1': store.discuss.isSidebarCompact}"
+                        title="AI conversations" aria-label="Toggle AI conversations"
+                        t-att-aria-expanded="category.open ? 'true' : 'false'"
+                        t-on-click="() => category.open = !category.open">
+                    <i class="fa-fw o-xsmaller position-absolute o-mt-0_5"
+                       t-att-class="{'oi oi-chevron-down': category.open, 'oi oi-chevron-right': !category.open, 'o-mail-DiscussSidebarCategory-chevronCompact': store.discuss.isSidebarCompact, 'ms-n3 align-self-center': !store.discuss.isSidebarCompact}"/>
+                    <span t-if="store.discuss.isSidebarCompact" class="rounded p-1"><i class="fa fa-magic fa-fw fa-lg"/></span>
+                    <span t-else="" class="o-mail-DiscussSidebarCategory-title text-break smaller d-flex align-items-center"
+                          t-att-class="{'fs-bold': category.open}">AI conversations</span>
+                </button>
+            </div>
+            <button t-if="category.open" class="o_ai_discuss_button o-mail-DiscussSidebar-item btn d-flex align-items-center gap-2 mx-2 text-start"
+                    t-att-class="{'bg-primary-subtle': state.discussActive, 'justify-content-center': store.discuss.isSidebarCompact}"
+                    t-att-title="state.assistant_name" aria-label="Open AI conversations" t-on-click="open">
+                <img src="/odoo_ai_assistant/static/description/icon.svg" alt="AI magic wand" width="28" height="28"/>
+                <span t-if="!store.discuss.isSidebarCompact" t-esc="state.assistant_name"/>
+            </button>
+        </t>
+    </t>
+    <!-- Optional chaining keeps stock Discuss working even if the assistant's scripts fail to load. -->
+    <t t-name="odoo_ai_assistant.DiscussWorkspace" t-inherit="mail.Discuss" t-inherit-mode="extension">
+        <xpath expr="//DiscussContent" position="before">
+            <div t-if="aiState?.discussActive" class="o_ai_discuss_workspace d-flex flex-grow-1 overflow-hidden w-100 min-w-0">
+                <AssistantPanel full="true"/>
+            </div>
+        </xpath>
+        <xpath expr="//DiscussContent" position="attributes">
+            <attribute name="t-if">!ui.isSmall and !aiState?.discussActive</attribute>
+        </xpath>
+        <xpath expr="//MessagingMenu" position="attributes">
+            <attribute name="t-if">ui.isSmall and !aiState?.discussActive</attribute>
+        </xpath>
+    </t>
+</templates>

@@ -1,0 +1,9 @@
+<odoo noupdate="1">
+    <record id="default_config" model="odoo.ai.assistant.config">
+        <field name="name">AI Settings</field>
+    </record>
+    <record id="ai_partner" model="res.partner">
+        <field name="name">Odoo AI</field>
+        <field name="is_company" eval="False"/>
+    </record>
+</odoo>
