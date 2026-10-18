@@ -806,7 +806,8 @@ class NativeMCP(models.AbstractModel):
     def _check_given(self, arguments, conversation):
         """A new record's name and required text come from the conversation, never from the AI alone: Odoo asks for
         a value nobody wrote (a placeholder such as "New Contact") instead of creating it, whatever the model.
-        Words naming the kind of record ("a new contact") are not values; a direct answer to the question always is."""
+        A value naming the kind of record counts only when the conversation names that kind elsewhere too ("a lead
+        Q3 Lead", not "a new lead"); a direct answer to the question always counts."""
         model = self.env[arguments["model"]]
         definitions = model.fields_get(attributes=["string", "type", "required"])
         names = [name for name, field in definitions.items()
@@ -818,13 +819,19 @@ class NativeMCP(models.AbstractModel):
             self.env["odoo.ai.assistant.tool.request"].sudo().search(
                 [("conversation_id", "=", conversation.id), ("state", "=", "shared")]).mapped("result")])
 
-        def squash(value):
-            return re.sub(r"\W+", "", value).casefold()
+        def words(value):
+            return " %s " % " ".join(re.findall(r"\w+", value.casefold()))
 
-        written, answer = squash(kind.sub(" ", text) if kind else text), squash(conversation._latest_question())
+        written, answer = words(text), words(conversation._latest_question())
+
+        def given(value):
+            value = words(value)
+            return value == answer or value in written and not (
+                kind and kind.search(value) and not kind.search(written.replace(value, " ")))
+
         missing = {definitions[name]["string"] for values in [arguments.get("values"), *(arguments.get("records") or [])]
                    if isinstance(values, dict) for name in names if isinstance(values.get(name), str)
-                   and squash(values[name]) not in written and squash(values[name]) != answer}
+                   and not given(values[name])}
         if missing:
             raise DirectReply(_("What %(fields)s should the new %(model)s have?") % {
                 "fields": ", ".join(sorted(missing)), "model": model._description})
@@ -1165,6 +1172,9 @@ class NativeMCP(models.AbstractModel):
                     if (isinstance(value, dict) and {"$odoo_ref", "$odoo_selection"} & set(value)
                             and (key not in definitions or CREDENTIAL_FIELD.search(key))):
                         raise AccessError(_("An action value refers to an unavailable or credential field."))
+                    if definitions and key not in definitions:
+                        # Odoo's own wording, so the AI is told the model's real fields and retries (_field_hint).
+                        raise ValidationError(_("Invalid field %(model)s.%(field)s") % {"model": model, "field": key})
             return {key: resolve(checked_value(key, _decoded_marker(value)), definitions.get(key))
                     for key, value in mapping.items()}
 
