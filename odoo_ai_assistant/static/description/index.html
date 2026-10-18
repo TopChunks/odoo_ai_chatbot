@@ -1,0 +1,55 @@
+<section class="container">
+  <h1>Odoo AI Assistant</h1>
+  <p>An AI chat assistant for Odoo 19 Community. Ask in plain language, in any language, and get
+    answers inside Odoo. It can show your records, draw charts, read files and prepare changes,
+    and <strong>nothing changes until you click Confirm</strong>.</p>
+  <p>Works with OpenAI, Anthropic Claude, Google Gemini and OpenRouter.</p>
+
+  <h2>What you can do</h2>
+  <ul>
+    <li><strong>Ask about Odoo:</strong> what an app can do, what a screen contains, and which app and
+      screen you have open, all based on the real menus of your database.</li>
+    <li><strong>Find and count records:</strong> "Find quotations for Acme", "How many leads are in each
+      stage?" Results appear as tables.</li>
+    <li><strong>Charts:</strong> bar, line, pie, doughnut, scatter or table. Open in Odoo opens the same
+      chart in Odoo's graph and pivot views.</li>
+    <li><strong>Files:</strong> attach a file from the + menu and ask about it, or ask about files
+      already attached to records. PDF, Word, Excel and PowerPoint text (PDF table rows stay together),
+      images with a preview, and text files.</li>
+    <li><strong>Confirmed changes:</strong> create, update or delete records, post notes, schedule
+      activities, attach files and run allowed business actions. Each one is previewed and runs only
+      after Confirm.</li>
+    <li><strong>Voice input</strong> from the + menu or Alt + V.</li>
+    <li><strong>Anywhere:</strong> a magic-wand chat on every screen, the full AI Assistant app, and an
+      AI conversations section in Discuss.</li>
+  </ul>
+
+  <h2>Private by default</h2>
+  <ul>
+    <li>Everything runs with each user's own Odoo permissions, only on the data an administrator
+      chooses.</li>
+    <li>Record values, file contents and chart data stay inside Odoo. They're sent to the AI provider
+      only if an administrator allows sharing and the user approves each result.</li>
+    <li>Typed messages go to the AI provider, so users shouldn't type confidential information.</li>
+    <li>Passwords, keys and security settings are always protected. Conversations are private to their
+      owner.</li>
+    <li>The API key is readable only by administrators and isn't encrypted, so protect database
+      backups.</li>
+  </ul>
+
+  <h2>Getting started</h2>
+  <ol>
+    <li>Install the free <strong>MCP Server</strong> module and this app, together with the Python
+      packages in <code>requirements.txt</code>.</li>
+    <li>Open <strong>AI Assistant &gt; Configuration &gt; Settings</strong>: enable the assistant,
+      choose a provider, paste its API key and choose a model.</li>
+    <li>Choose which Odoo data the AI may read or change.</li>
+    <li>Give users access on their <strong>Access Rights</strong> tab (AI &gt; AI Assistant = Yes),
+      then reload Odoo to see the magic wand.</li>
+  </ol>
+
+  <h2>For administrators</h2>
+  <p>A usage dashboard shows tokens, AI calls and active users, and audit reports list every preview,
+    confirmation and action. See the README for installation details, costs, troubleshooting and the
+    developer guide.</p>
+</section>

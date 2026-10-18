@@ -1,0 +1,4 @@
+markdown2>=2.5.4,<3
+jsonschema>=4.23,<5
+# Optional: PDF text for attachments (bundled with Odoo's official packages)
+pdfminer.six
