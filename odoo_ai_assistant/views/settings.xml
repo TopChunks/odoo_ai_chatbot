@@ -1,0 +1,72 @@
+<odoo>
+    <record id="settings_form" model="ir.ui.view">
+        <field name="name">res.config.settings.ai</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app string="AI Agent" name="odoo_ai_assistant" groups="base.group_system" logo="/odoo_ai_assistant/static/description/icon.svg">
+                    <block title="AI Settings / App Configuration">
+                        <setting string="Enable AI Agent" help="Grant each user access on their Access Rights tab, in the AI section.">
+                            <field name="ai_assistant_enabled"/>
+                            <div class="alert alert-warning mt-3 mb-0" role="alert">
+                                Messages typed in the chat are sent to your AI provider; do not type sensitive data into the chat.
+                                Odoo records the AI reads stay inside Odoo unless an administrator allows sharing (Advanced, in developer mode) and a user approves it.
+                                The API key is stored in Odoo and readable only by administrators.
+                            </div>
+                        </setting>
+                        <setting string="AI provider" help="Changing provider or key loads that provider's available models.">
+                            <field name="ai_assistant_key_provider" invisible="1"/>
+                            <field name="ai_assistant_provider"/>
+                            <div class="mt-3">
+                                <label for="ai_assistant_api_key"/>
+                                <field name="ai_assistant_api_key" password="True" autocomplete="off"/>
+                            </div>
+                            <div class="mt-3">
+                                <label for="ai_assistant_model_id"/>
+                                <field name="ai_assistant_model_id" domain="[('provider', '=', ai_assistant_provider), ('active', '=', True)]" options="{'no_create': True, 'no_open': True}"/>
+                            </div>
+                            <button name="action_refresh_ai_models" type="object" string="Refresh available models" class="btn-link mt-2" icon="fa-refresh"/>
+                        </setting>
+                        <setting string="Configure AI Permissions" help="Users can ask about records they can already see, like &quot;Show this month's sales&quot;. Odoo finds the answer and shows it. Your data never goes to the AI, only field names like &quot;Customer&quot; or &quot;Amount&quot;. Turned off? The AI can still explain how Odoo works, but it can't look at your records.">
+                            <field name="ai_assistant_local_tools"/>
+                            <button type="action" name="%(mcp_server.action_mcp_enabled_models)d" string="Choose which Odoo data the AI may use" class="btn-link" icon="fa-arrow-right" groups="mcp_server.group_mcp_admin"/>
+                        </setting>
+                        <setting string="Changes with your approval" help="Users can ask to create, edit or delete records, like &quot;Create a quotation for Azure Interior&quot;. They see a preview first, and nothing is saved until they click Confirm. They can only change what they're already allowed to. Turned off? The AI can still look things up, but it can't change anything. Needs Configure AI Permissions turned on too.">
+                            <field name="ai_assistant_native_actions"/>
+                        </setting>
+                        <setting string="Let the AI see menu and screen names" help="Lets the AI explain apps, menus and screens. Menu names and form field labels are shared with the AI provider, never record values.">
+                            <field name="ai_assistant_screen_metadata"/>
+                        </setting>
+                    </block>
+                    <block title="Advanced" groups="base.group_no_one">
+                        <setting string="Allow sharing results with the AI provider" help="Off by default. When on, users can click 'Share and continue' on a result so the AI can analyze it. Each share needs the user's approval.">
+                            <field name="ai_assistant_business_data_sharing"/>
+                        </setting>
+                        <setting string="AI data requests per user per minute" help="Protects Odoo from runaway requests (1 to 600).">
+                            <field name="ai_assistant_native_rate_limit"/>
+                        </setting>
+                        <setting string="Maximum answer length (tokens)" help="Upper limit for each AI answer (256 to 65,536). Reasoning models count their thinking too. Longer answers can cost more.">
+                            <field name="ai_assistant_max_output_tokens"/>
+                        </setting>
+                        <setting string="Provider timeout (seconds)" help="How long to wait for the AI provider to answer (10 to 600 seconds).">
+                            <field name="ai_assistant_request_timeout"/>
+                        </setting>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="provider_model_search" model="ir.ui.view">
+        <field name="name">odoo.ai.assistant.provider.model.search</field>
+        <field name="model">odoo.ai.assistant.provider.model</field>
+        <field name="arch" type="xml">
+            <search string="AI Models">
+                <field name="name"/>
+                <filter name="free" string="Free" domain="[('pricing', '=', 'free')]" help="Models the provider lists at no cost per token"/>
+                <filter name="commercial" string="Commercial" domain="[('pricing', '=', 'commercial')]" help="Models the provider charges for per token"/>
+            </search>
+        </field>
+    </record>
+</odoo>

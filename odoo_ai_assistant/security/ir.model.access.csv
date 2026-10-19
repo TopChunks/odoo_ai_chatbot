@@ -1,0 +1,9 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_ai_config,AI configuration administrator,model_odoo_ai_assistant_config,base.group_system,1,1,0,0
+access_ai_provider_model,AI models administrator,model_odoo_ai_assistant_provider_model,base.group_system,1,1,1,1
+access_ai_conversation,Private AI conversations,model_odoo_ai_assistant_conversation,group_ai_user,1,0,0,1
+access_ai_message,Private AI messages,model_odoo_ai_assistant_message,group_ai_user,1,0,0,0
+access_ai_usage,AI usage administrators,model_odoo_ai_assistant_usage,base.group_system,1,0,0,0
+access_ai_tool_request,AI tool request audit administrators,model_odoo_ai_assistant_tool_request,base.group_system,1,0,0,0
+access_ai_tool_event,AI native tool audit administrators,model_odoo_ai_assistant_tool_event,base.group_system,1,0,0,0
+access_ai_upload,AI staged uploads administrators,model_odoo_ai_assistant_upload,base.group_system,1,0,0,0
