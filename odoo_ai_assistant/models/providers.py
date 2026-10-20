@@ -110,6 +110,11 @@ _MAX_CONTEXT_LEVEL = 3
 # OpenAI models that rejected the Responses API or structured output and answered through
 # Chat Completions instead (for example gpt-3.5-turbo and gpt-4). Learned, never hardcoded.
 _OPENAI_CHAT_COMPLETIONS = set()
+# How much a thinking model reasons before answering: the least it accepts, tried in this order. The chat picks a tool
+# or a label, and a model's own default (often "high") makes replies slow and uses up the answer budget. Rejections
+# are learned per model, never hardcoded; a model that rejects every level is asked without one.
+_REASONING_EFFORTS = ("minimal", "low")
+_REASONING_STEP = {}  # (provider, model) -> index in _REASONING_EFFORTS of the level to ask for
 # Screen-context parts that are the same on every request for a user. They stay in the instructions, which
 # providers cache; everything else (date, current screen, schemas, screen details) is sent per request.
 _STABLE_CONTEXT_KEYS = ("running_version", "menus", "total_screens", "truncated", "ai_settings")
@@ -132,6 +137,11 @@ class ProviderClient:
         self.observer = observer
         self.max_output_tokens = max_output_tokens
         self.timeout = timeout
+
+    def _effort(self, model):
+        """The reasoning level to ask `model` for, or None once it has rejected them all."""
+        step = _REASONING_STEP.get((self.provider, model), 0)
+        return _REASONING_EFFORTS[step] if step < len(_REASONING_EFFORTS) else None
 
     def _observe(self, event, data):
         if self.observer:
@@ -213,6 +223,8 @@ class ProviderClient:
         error = body.get("error") if isinstance(body, dict) else None
         message = str(error.get("message", "")) if isinstance(error, dict) else ""
         text = (message + " " + (code or "")).lower()
+        if status == 400 and re.search(r"thinking|reasoning", text):
+            return "reasoning"  # the model rejects this reasoning level (see _REASONING_EFFORTS)
         if code == "context_length_exceeded" or status == 413 or re.search(
             r"context.{0,20}(length|window|limit)|prompt is too long|too many tokens|"
             r"maximum (context|number of tokens)|exceeds the (maximum|limit)|input token count", text,
@@ -639,7 +651,7 @@ class ProviderClient:
         """Send a request, shortening it step by step when the model's context window is too small."""
         key = (self.provider, model)
         level = _CONTEXT_LEVELS.get(key, 0)
-        empty_retried = False
+        empty_retried, busy_retries = False, 0
         while True:
             compact_history, compact_tools, compact_options = self._compact(level, history, tools, options)
             try:
@@ -648,6 +660,15 @@ class ProviderClient:
                 # An empty answer is usually transient; ask once more before reporting it.
                 if error.kind == "empty" and not empty_retried:
                     empty_retried = True
+                    continue
+                if error.kind == "reasoning" and self._effort(model):
+                    _REASONING_STEP[key] = _REASONING_STEP.get(key, 0) + 1
+                    continue
+                # An overloaded provider (HTTP 5xx) usually recovers within seconds: retry twice, a little later
+                # each time (the time limit of _request still applies).
+                if error.kind == "unavailable" and busy_retries < 2:
+                    busy_retries += 1
+                    time.sleep(2 * busy_retries)
                     continue
                 if error.kind != "context" or level >= _MAX_CONTEXT_LEVEL:
                     raise
@@ -748,6 +769,8 @@ class ProviderClient:
         }
         if self.provider == "openrouter":
             payload["usage"] = {"include": True}  # OpenRouter then reports the request's exact cost
+            if effort := self._effort(model):
+                payload["reasoning"] = {"effort": effort}
         if tools:
             payload["tools"] = [{"type": "function", "function": {
                 "name": tool["name"], "description": tool["description"],
@@ -765,7 +788,11 @@ class ProviderClient:
         result = self._request("POST", "/chat/completions", payload)
         choices = result.get("choices", [])
         if not choices:
-            raise UserError(_("The AI provider returned no answer."))
+            # OpenRouter reports an upstream failure, such as an overloaded model, inside a successful response.
+            error = result.get("error")
+            code = error.get("code") if isinstance(error, dict) else None
+            raise ProviderError(_("The AI provider returned no answer."),
+                                kind="unavailable" if isinstance(code, int) and code >= 500 else "request")
         message = choices[0]["message"]
         text = message.get("content") or ""
         calls = [{"name": call["function"]["name"],
@@ -782,6 +809,8 @@ class ProviderClient:
             "model": model, "instructions": system, "input": history,
             "store": False, "max_output_tokens": self.max_output_tokens,
         }
+        if effort := self._effort(model):
+            payload["reasoning"] = {"effort": effort}
         if output_schema is not None:
             payload["text"] = {"format": {
                 "type": "json_schema", "name": "classification", "strict": True,
@@ -1055,7 +1084,8 @@ class ProviderClient:
                 "systemInstruction": {"parts": [{"text": system}]},
                 "contents": [{"role": "model" if m["role"] == "assistant" else "user",
                               "parts": [{"text": m["content"]}]} for m in history],
-                "generationConfig": {"maxOutputTokens": self.max_output_tokens},
+                "generationConfig": {"maxOutputTokens": self.max_output_tokens, **(
+                    {"thinkingConfig": {"thinkingLevel": effort}} if (effort := self._effort(model)) else {})},
             }
             if gemini_tools:
                 payload["tools"] = [{"functionDeclarations": [

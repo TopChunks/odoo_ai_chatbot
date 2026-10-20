@@ -194,7 +194,7 @@ def execute_chart(env, arguments):
     group_type = definitions[group]["type"]
     if chart == "scatter" and group_type not in _NUMERIC_TYPES:
         raise ValidationError(_("Scatter charts require a numeric grouping field."))
-    value_label = _("Record count")
+    value_label, note = _("Record count"), ""
     if operation == "count":
         if measure:
             raise ValidationError(_("Leave measure empty for a count chart."))
@@ -213,11 +213,19 @@ def execute_chart(env, arguments):
         # Odoo leaves currency_field empty when it defaults to currency_id; resolve it the ORM's way.
         currency = model._fields[measure].get_currency_field(model) if definition["type"] == "monetary" else None
         if currency:
-            currencies = model._read_group(domain, groupby=[currency], aggregates=["__count"], limit=2)
-            if len(currencies) > 1:
-                raise ValidationError(_("Filter to one currency before adding up monetary values."))
-            if currencies and currencies[0][0]:
-                value_label += f" ({currencies[0][0].name})"
+            counts = dict(model._read_group(domain, groupby=[currency], aggregates=["__count"]))
+            if len(counts) > 1:
+                # Amounts in different currencies cannot be added up: chart the currency most of the records use
+                # (the company's on a tie), as Odoo's own reports show one currency, and say what is left out.
+                kept = max((key for key in counts if key),
+                           key=lambda key: (counts[key], key == env.company.currency_id))
+                domain = domain + [[currency, "=", kept.id]]
+                note = _("Only amounts in %(kept)s are shown. Left out, in %(others)s: %(count)s.") % {
+                    "kept": kept.name, "count": sum(number for key, number in counts.items() if key != kept),
+                    "others": ", ".join(key.name for key in counts if key and key != kept) or _("no currency")}
+                counts = {kept: counts[kept]}
+            if counts and next(iter(counts)):
+                value_label += f" ({next(iter(counts)).name})"
     grouping = f"{group}:{interval}" if group_type in {"date", "datetime"} else group
     result = env["odoo.ai.assistant.mcp"]._execute("ai_group_records", {
         "model": name, "domain": domain, "group": grouping, "measure": aggregate,
@@ -240,9 +248,9 @@ def execute_chart(env, arguments):
             {"key": "label", "label": definitions[group]["string"]},
             {"key": "value", "label": value_label},
         ], "rows": [{"label": label, "value": value} for label, value in zip(labels, values)],
-            "truncated": result["truncated"]}
+            "truncated": result["truncated"], "note": note}
     return {"kind": "chart", "title": title, "chart_type": chart, "operation": operation, "labels": labels,
-            "values": values, "value_label": value_label, "truncated": result["truncated"],
+            "values": values, "value_label": value_label, "truncated": result["truncated"], "note": note,
             # Shown under the chart: the AI never sees these values, so it cannot state the total itself.
             "total": None if operation == "avg" else sum(values)}
 

@@ -3,7 +3,7 @@
     <t t-name="odoo_ai_assistant.Systray">
         <div t-if="state.enabled" class="o_ai_systray">
             <!-- Drawn like Odoo's own systray icons, so it takes the navbar's colours in any theme. -->
-            <button class="o_nav_entry btn border-0" title="Ask AI" aria-label="Open AI Agent" t-on-click="() => ai.open()">
+            <button class="o_nav_entry btn border-0" title="AI Agent" aria-label="Open AI Agent" t-on-click="() => ai.open()">
                 <i class="fa fa-lg fa-magic" role="img" aria-label="AI magic wand"/>
             </button>
         </div>

@@ -720,7 +720,8 @@ class AIConversation(models.Model):
         reason = self._try_dispatch(client, config, history, calls, steps, action_request)
         if reason is None:
             return
-        self._add_step(steps, _("Choosing another approach after: %s") % reason)
+        # The reason is for the AI (field names, filters); the user sees plain words.
+        self._add_step(steps, _("Odoo could not run the AI's first try, so it is trying another way"))
         latest = history[-1]
         retry_history = history[:-1] + [dict(latest, content=latest["content"] + (
             "\n\n[Odoo note: the tool call you chose could not run: %s.%s Choose a different available tool "
@@ -735,8 +736,8 @@ class AIConversation(models.Model):
         elif text.strip():
             self._store_answer(text, execution_steps=steps, payload=self._named_apps())
             return
-        self._store_answer(_("I couldn't complete this request in Odoo: %s") % reason,
-                           local_only=True, execution_steps=steps)
+        self._store_answer(_("I couldn't complete this request in Odoo. Please ask it another way, for example with "
+                             "the exact names, dates or filters you want."), local_only=True, execution_steps=steps)
 
     def _dispatch_calls(self, client, config, history, calls, steps, allow_native_only=False, discovery_depth=0,
                         action_request=False):
@@ -809,7 +810,8 @@ class AIConversation(models.Model):
                     payload = dict(execute_chart(self.env, arguments), query={"tool": CHART_TOOL, "arguments": arguments})
                     if not payload.get("labels", payload.get("rows")):
                         raise DirectReply(_("No records match this chart's filters, so there is nothing to draw."))
-                    self._store_answer(_("Local Odoo chart: %s") % payload["title"],
+                    self._store_answer("\n".join(filter(None, [_("Local Odoo chart: %s") % payload["title"],
+                                                               payload["note"]])),
                                        local_only=True, payload=payload, execution_steps=list(steps))
                 else:
                     terminal_result = True

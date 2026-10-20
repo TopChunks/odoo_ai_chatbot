@@ -1,11 +1,15 @@
-<odoo noupdate="1">
-    <record id="default_config" model="odoo.ai.assistant.config">
-        <field name="name">AI Settings</field>
-    </record>
-    <record id="ai_partner" model="res.partner">
-        <field name="name">Odoo AI</field>
-        <field name="is_company" eval="False"/>
-        <!-- A service author, archived like OdooBot so it stays out of contact lists, searches and mentions. -->
-        <field name="active" eval="False"/>
-    </record>
+<odoo>
+    <data noupdate="1">
+        <record id="default_config" model="odoo.ai.assistant.config">
+            <field name="name">AI Settings</field>
+        </record>
+        <record id="ai_partner" model="res.partner">
+            <field name="name">AI Agent</field>
+            <field name="is_company" eval="False"/>
+            <!-- A service author, archived like OdooBot so it stays out of contact lists, searches and mentions. -->
+            <field name="active" eval="False"/>
+        </record>
+    </data>
+    <!-- The name the chat shows for the AI. The record above is created only once, so its name is set on every update. -->
+    <function model="res.partner" name="write" eval="[[ref('ai_partner')], {'name': 'AI Agent'}]"/>
 </odoo>
