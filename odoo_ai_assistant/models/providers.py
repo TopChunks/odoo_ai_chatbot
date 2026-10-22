@@ -92,6 +92,8 @@ GREETING_INSTRUCTIONS = (
 # Reply for requests outside Odoo; used in the system prompt and stored as the chat answer.
 _lt = LazyTranslate(__name__)
 SCOPE_REFUSAL = _lt("I can only assist with Odoo and the data available to you in Odoo.")
+# Starts the notes that stand in the history for results kept in Odoo; a reply that only repeats one is no answer.
+SYSTEM_NOTE = "[System note, not a reply:"
 
 
 class ProviderError(UserError):
@@ -386,6 +388,8 @@ class ProviderClient:
             raise UserError(_("The AI provider returned an invalid response object."))
         self._observe("received", {
             "http_status": response.status_code, "tokens": self._tokens(result), "cost": self._cost(result),
+            # The model that answered: an alias such as gemini-flash-latest names its real model here.
+            "model": result.get("modelVersion") or result.get("model"),
         })
         return result
 
@@ -1108,7 +1112,7 @@ class ProviderClient:
             calls = [{"name": p["functionCall"]["name"],
                       "arguments": p["functionCall"].get("args", {})}
                      for p in parts if "functionCall" in p]
-        if not text and not calls:
+        if not calls and (not text or text.lstrip().startswith(SYSTEM_NOTE)):
             raise ProviderError(_("The AI provider returned an empty answer. Please retry."), kind="empty")
         if tool_choice is not None and (not calls or any(call.get("name") != tool_choice for call in calls)):
             raise ProviderError(_("The AI provider did not run the required local chart tool. No chart data was "

@@ -311,7 +311,17 @@ class NativeMCP(models.AbstractModel):
 
     def get_current_context(self):
         self._access()
-        return super().get_current_context()
+        result = super().get_current_context()
+        # MCP Server's text is guidance for an AI; the user sees who they are as a table instead.
+        user = self.env.user
+        result["structuredContent"] = {
+            "title": _("Your account"), "columns": [{"key": "label", "label": _("Detail")},
+                                                    {"key": "value", "label": _("Value")}],
+            "rows": [{"label": label, "value": value} for label, value in (
+                (_("Name"), user.name), (_("Login"), user.login), (_("Company"), self.env.company.name),
+                (_("Timezone"), user.tz or _("Not set")))],
+        }
+        return result
 
     def list_resource_templates(self):
         self._access()

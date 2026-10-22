@@ -156,10 +156,13 @@ class AIUsage(models.Model):
             if data.get("cost") is not None:
                 values.update(cost=data["cost"], cost_source="provider")
             elif counts is not None:
-                model = self.env["odoo.ai.assistant.provider.model"].sudo().with_context(active_test=False).search(
-                    [("provider", "=", provider), ("identifier", "=", model_name)], limit=1)
-                if model and (cost := model._cost(counts)) is not None:
-                    values.update(cost=cost, cost_source="estimate")
+                # The selected model's prices, else those of the model that answered (an alias has none of its own).
+                catalogue = self.env["odoo.ai.assistant.provider.model"].sudo().with_context(active_test=False)
+                for name in dict.fromkeys(filter(None, (model_name, data.get("model")))):
+                    model = catalogue.search([("provider", "=", provider), ("identifier", "=", name)], limit=1)
+                    if model and (cost := model._cost(counts)) is not None:
+                        values.update(cost=cost, cost_source="estimate")
+                        break
             if counts is not None:
                 values.update(counts, tokens_known=True)
             elif purpose != "catalogue" and event == "received":

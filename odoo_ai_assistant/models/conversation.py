@@ -13,7 +13,9 @@ from odoo.tools import SQL, html2plaintext
 from odoo.tools.image import image_process
 from odoo.tools.mimetypes import guess_mimetype
 
-from .providers import GREETING_INSTRUCTIONS, SCOPE_REFUSAL, ProviderClient, ProviderError, latest_user_index
+from .providers import (
+    GREETING_INSTRUCTIONS, SCOPE_REFUSAL, SYSTEM_NOTE, ProviderClient, ProviderError, latest_user_index,
+)
 from .formatting import format_reply
 from . import chart_export
 from .configuration import _SETTINGS_FIELDS
@@ -477,10 +479,9 @@ class AIConversation(models.Model):
         entries = [{
             "role": message.role,
             # A bracketed system note, so models do not echo it as their own reply.
-            "content": ("[System note, not a reply: an earlier request was completed and its result was "
+            "content": (SYSTEM_NOTE + " an earlier request was completed and its result was "
                         "shown to the user inside Odoo; the values are not shared with you.%s Answer the "
-                        "user's latest message; do not repeat this note, and do not run the earlier request again "
-                        "unless the latest message asks for it.]" % self._query_note(message)
+                        "user's latest message; do not repeat this note.]" % self._query_note(message)
                         if message.local_only or message.provider_sensitive else self._provider_text(message)),
         } for message in reversed(history)]
         while entries and entries[0]["role"] != "user":
