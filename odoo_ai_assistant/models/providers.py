@@ -661,9 +661,12 @@ class ProviderClient:
             try:
                 result = self._reply_once(model, compact_history, compact_tools, **compact_options)
             except ProviderError as error:
-                # An empty answer is usually transient; ask once more before reporting it.
+                # An empty answer is usually transient; ask once more before reporting it. A model that only
+                # repeated a history note is asked again without the notes and the requests they stand for.
                 if error.kind == "empty" and not empty_retried:
                     empty_retried = True
+                    notes = {index for index, entry in enumerate(history) if entry["content"].startswith(SYSTEM_NOTE)}
+                    history = [entry for index, entry in enumerate(history) if not {index, index + 1} & notes]
                     continue
                 if error.kind == "reasoning" and self._effort(model):
                     _REASONING_STEP[key] = _REASONING_STEP.get(key, 0) + 1
