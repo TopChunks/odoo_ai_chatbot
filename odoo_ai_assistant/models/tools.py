@@ -240,7 +240,7 @@ def execute_chart(env, arguments):
     if limit:
         pairs = sorted(zip(labels, values), key=lambda pair: pair[1], reverse=True)
         # The rest add up as one "Others" group; an average of averages would mislead, so averages keep the top N only.
-        pairs = pairs[:limit] + ([(_("Others"), sum(value for _label, value in pairs[limit:]))]
+        pairs = pairs[:limit] + ([(_("Others"), (result["total"] or 0) - sum(value for _label, value in pairs[:limit]))]
                                  if pairs[limit:] and operation != "avg" else [])
         labels, values = [pair[0] for pair in pairs], [pair[1] for pair in pairs]
     if chart == "table":
@@ -252,7 +252,7 @@ def execute_chart(env, arguments):
     return {"kind": "chart", "title": title, "chart_type": chart, "operation": operation, "labels": labels,
             "values": values, "value_label": value_label, "truncated": result["truncated"], "note": note,
             # Shown under the chart: the AI never sees these values, so it cannot state the total itself.
-            "total": None if operation == "avg" else sum(values)}
+            "total": None if operation == "avg" else result["total"] or 0}
 
 
 def cell_value(model, name, value):

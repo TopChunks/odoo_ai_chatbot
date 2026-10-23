@@ -372,7 +372,8 @@ class AIConversation(models.Model):
         event = self.env["odoo.ai.assistant.tool.event"]._begin(request.tool, state="shared")
         history = self._provider_history()
         client = config._client("reply", self._model(config))
-        options = {"native_tools": True, "tool_context": evidence, "tool_images": images}
+        shared = {"tool_context": evidence, "tool_images": images}
+        options = {"native_tools": True, **shared}
         if config.screen_metadata:
             options["screen_context"] = screen_context(self.env, menus=False)
         try:
@@ -384,7 +385,7 @@ class AIConversation(models.Model):
         request.write({"state": "shared"})
         self._update_tool_message(request)
         if calls:
-            self._dispatch_calls(client, config, history, calls, [], allow_native_only=True)
+            self._dispatch_with_recovery(client, config, history, calls, [], tools, options, False, shared=shared)
         else:
             self._store_answer(text, provider_sensitive=True)
         return self.get_messages()
@@ -692,12 +693,13 @@ class AIConversation(models.Model):
             catalogue[tool["name"]]["operation"] == operation or tool["name"] == PRESS_TOOL)]
         return matching or selected
 
-    def _try_dispatch(self, client, config, history, calls, steps, action_request):
+    def _try_dispatch(self, client, config, history, calls, steps, action_request, shared=None):
         """Run tool calls in a savepoint. Return why Odoo refused them, or None when they ran or Odoo has answered
         instead (a missing MCP Server permission, a value only the user can give)."""
         try:
             with self.env.cr.savepoint():
-                self._dispatch_calls(client, config, history, calls, steps, action_request=action_request)
+                self._dispatch_calls(client, config, history, calls, steps, action_request=action_request,
+                                     shared=shared)
         except ProviderError:
             raise
         except DirectReply as error:
@@ -715,10 +717,12 @@ class AIConversation(models.Model):
             self._store_answer(_("Odoo could not get this data right now. Please try again."), execution_steps=steps)
         return None
 
-    def _dispatch_with_recovery(self, client, config, history, calls, steps, tools, options, action_request):
+    def _dispatch_with_recovery(self, client, config, history, calls, steps, tools, options, action_request,
+                                shared=None):
         """Run the provider's tool calls. If Odoo refuses or rejects a call, tell the provider once
-        so it can choose another tool; if that also fails, answer with the reason instead of an error."""
-        reason = self._try_dispatch(client, config, history, calls, steps, action_request)
+        so it can choose another tool; if that also fails, answer with the reason instead of an error.
+        ``shared`` is the result the user agreed to share, when continuing from it (native tools only)."""
+        reason = self._try_dispatch(client, config, history, calls, steps, action_request, shared)
         if reason is None:
             return
         # The reason is for the AI (field names, filters); the user sees plain words.
@@ -731,16 +735,16 @@ class AIConversation(models.Model):
         ))]
         text, retry_calls = client.reply(self._model(config).identifier, retry_history, tools, **options)
         if retry_calls:
-            reason = self._try_dispatch(client, config, retry_history, retry_calls, steps, action_request)
+            reason = self._try_dispatch(client, config, retry_history, retry_calls, steps, action_request, shared)
             if reason is None:
                 return
         elif text.strip():
-            self._store_answer(text, execution_steps=steps, payload=self._named_apps())
+            self._store_answer(text, execution_steps=steps, payload=self._named_apps(), provider_sensitive=bool(shared))
             return
         self._store_answer(_("I couldn't complete this request in Odoo. Please ask it another way, for example with "
                              "the exact names, dates or filters you want."), local_only=True, execution_steps=steps)
 
-    def _dispatch_calls(self, client, config, history, calls, steps, allow_native_only=False, discovery_depth=0,
+    def _dispatch_calls(self, client, config, history, calls, steps, shared=None, discovery_depth=0,
                         action_request=False):
         tools = available_tools(self.env) if config.local_tools else []
         if action_request:
@@ -779,7 +783,7 @@ class AIConversation(models.Model):
                             if len(calls) == 1:
                                 raise
                             refused.append(error)
-                elif allow_native_only:
+                elif shared:
                     raise UserError(_("Use a native MCP tool when continuing an approved shared result."))
                 elif call["name"] == "odoo_screen_details":
                     terminal_result = True
@@ -838,16 +842,16 @@ class AIConversation(models.Model):
                 raise UserError(_("The AI kept discovering schemas without completing your query. "
                                   "Please retry with a narrower request."))
             progress(_("Using discovered fields to complete your request"))
-            options = self._reply_context(config)
+            options = dict(self._reply_context(config), **(shared or {}))
             options["screen_context"]["discovered_schemas"] = discovery
-            next_tools = [tool for tool in tools if not allow_native_only or tool["name"].startswith(NATIVE_TOOL_PREFIX)]
+            next_tools = [tool for tool in tools if not shared or tool["name"].startswith(NATIVE_TOOL_PREFIX)]
             text, next_calls = client.reply(self._model(config).identifier, history, next_tools, **options)
             if next_calls:
                 self._dispatch_calls(client, config, history, next_calls, steps,
-                                     allow_native_only=allow_native_only, discovery_depth=discovery_depth + 1,
+                                     shared=shared, discovery_depth=discovery_depth + 1,
                                      action_request=action_request)
             elif text.strip():
-                self._store_answer(text, execution_steps=list(steps))
+                self._store_answer(text, execution_steps=list(steps), provider_sensitive=bool(shared))
             else:
                 raise UserError(_("The AI did not complete your query after schema discovery. Please retry."))
 

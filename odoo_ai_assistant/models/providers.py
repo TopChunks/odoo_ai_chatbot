@@ -804,7 +804,7 @@ class ProviderClient:
         text = message.get("content") or ""
         calls = [{"name": call["function"]["name"],
                   "arguments": call["function"]["arguments"]}
-                 for call in message.get("tool_calls", [])]
+                 for call in message.get("tool_calls") or []]
         # A cut-off tool call is unusable; cut-off prose is returned like other providers' answers.
         if choices[0].get("finish_reason") == "length" and (calls or not text):
             raise self._length_error()

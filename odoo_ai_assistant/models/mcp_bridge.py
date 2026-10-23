@@ -55,8 +55,10 @@ class AILocalMCP(models.AbstractModel):
     @api.model
     def _ai_group_records(self, model, domain, group, measure):
         model_rs = self._check_op(model, "read")
+        # Largest groups first (periods keep their order), so the groups kept within the limit are the biggest.
         grouped = model_rs._read_group(
             self._coerce_domain(domain), groupby=[group], aggregates=[measure], limit=MAX_CHART_GROUPS + 1,
+            order=None if ":" in group else f"{measure} desc",
         )
         field = model_rs._fields[group.split(":")[0]]
         if ":" in group:
@@ -83,7 +85,9 @@ class AILocalMCP(models.AbstractModel):
             elif label is False:
                 label = _("Unassigned")
             rows.append({"label": str(label), "value": value})
-        return {"structuredContent": {"rows": rows[:MAX_CHART_GROUPS], "truncated": len(rows) > MAX_CHART_GROUPS}}
+        return {"structuredContent": {"rows": rows[:MAX_CHART_GROUPS], "truncated": len(rows) > MAX_CHART_GROUPS,
+                                      # Over every group, also those past the limit ("Others", the chart's total).
+                                      "total": model_rs._read_group(self._coerce_domain(domain), [], [measure])[0][0]}}
 
     def _execute(self, tool_name, arguments):
         allowed = {"ai_group_records"}

@@ -71,9 +71,9 @@ class AIProviderModel(models.Model):
 
     def _cost(self, tokens):
         """Estimated USD cost of a request's token counts (a dict or a usage record) at this model's prices;
-        None without prices."""
+        None without prices (OpenRouter lists a router's price, which depends on its pick, as negative)."""
         self.ensure_one()
-        if not (self.price_input or self.price_output):
+        if not (self.price_input or self.price_output) or min(self.price_input, self.price_output) < 0:
             return None
         fresh = tokens["input_tokens"] - tokens["cached_tokens"]
         return (fresh * self.price_input + tokens["output_tokens"] * self.price_output
