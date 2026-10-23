@@ -5,6 +5,7 @@ import math
 from datetime import date, datetime
 
 from odoo import _, fields, release
+from odoo.tools.misc import formatLang, get_lang
 from odoo.exceptions import AccessError, UserError, ValidationError
 
 from .limits import CREDENTIAL_FIELD, CURRENT_USER, MAX_CHART_TITLE_CHARS, MAX_FIELD_SUGGESTIONS, is_restricted_model
@@ -277,18 +278,34 @@ def execute_chart(env, arguments):
             "total": None if operation == "avg" else result["total"] or 0}
 
 
-def cell_value(model, name, value):
-    """Odoo reads an empty field as False; show it empty unless the field is a checkbox."""
+def cell_value(model, name, value, row=None):
+    """A table cell as Odoo's own screens show it: a selection's label, dates in the user's language format and
+    time zone, numbers grouped with the field's decimals (and the row's currency when the row has it).
+    Odoo reads an empty field as False; it shows empty unless the field is a checkbox."""
     field = model._fields.get(name)
     if value is False and field and field.type != "boolean":
         return None
+    env = model.env
     if field and field.type in ("one2many", "many2many") and isinstance(value, list):
         # Linked records by name, as far as the user may read them: their IDs mean nothing to a reader.
-        value = ", ".join(model.env[field.comodel_name].browse(value).exists()._filtered_access("read").mapped(
+        value = ", ".join(env[field.comodel_name].browse(value).exists()._filtered_access("read").mapped(
             "display_name")) or None
-    if field and field.type == "datetime" and isinstance(value, str):
-        # Odoo stores UTC; show the user's own time, as Odoo's screens do.
-        value = fields.Datetime.context_timestamp(model, datetime.fromisoformat(value))
+    elif field and field.type == "selection" and isinstance(value, str):
+        value = dict(field._description_selection(env)).get(value, value)
+    elif field and field.type in ("date", "datetime") and isinstance(value, str):
+        lang = get_lang(env)
+        with contextlib.suppress(ValueError):  # a grouped period ("September 2026") is already a label
+            # Odoo stores UTC; show the user's own time, as Odoo's screens do.
+            value = (fields.Date.to_date(value).strftime(lang.date_format) if field.type == "date" else
+                     fields.Datetime.context_timestamp(model, datetime.fromisoformat(value)).strftime(
+                         "%s %s" % (lang.date_format, lang.time_format.replace(":%S", ""))))
+    elif field and field.type in ("float", "monetary") and type(value) in (int, float):
+        linked = (row or {}).get(field.get_currency_field(model)) if field.type == "monetary" else None
+        currency = env["res.currency"].browse(linked[0]).exists() if isinstance(linked, (list, tuple)) and linked else None
+        # Money: the currency's decimals (2 without a currency); a decimal field: its own, or as stored if it has none.
+        digits = field.get_digits(env) if field.type == "float" else (16, 2)
+        if digits:
+            value = formatLang(env, value, digits=digits[1], currency_obj=currency or None)
     return table_value(value)
 
 

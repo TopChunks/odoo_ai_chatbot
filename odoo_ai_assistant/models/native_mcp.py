@@ -1542,7 +1542,7 @@ class NativeToolRequest(models.Model):
                 table = {
                     "kind": "table", "title": self.env[model]._description,
                     "columns": [{"key": key, "label": label(key)} for key in keys],
-                    "rows": [{key: cell_value(self.env[model].with_user(self.user_id), key.partition(":")[0], value)
+                    "rows": [{key: cell_value(self.env[model].with_user(self.user_id), key.partition(":")[0], value, row)
                               for key, value in row.items()}
                              for row in rows if row],
                     "total": total, "offset": offset,
