@@ -159,6 +159,9 @@ change?), the **answer**, and a tiny one to **title** a new conversation. Answer
 distributed separately under its own license, not included here) · an API key from OpenAI, Anthropic, Google
 or OpenRouter.
 
+> **MCP Server version:** tested with **MCP Server 19.0.2.2.0**. AI Agent builds on some of MCP Server's internal
+> methods, so before installing a newer MCP Server version, test the chat on a copy of your database first.
+
 1. Put the `odoo_ai_assistant` and `mcp_server` folders in a folder on Odoo's **addons path**.
 2. Install the Python packages with the Python that runs Odoo:
 
