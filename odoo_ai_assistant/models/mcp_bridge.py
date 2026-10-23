@@ -7,6 +7,7 @@ from odoo.orm.models import READ_GROUP_DISPLAY_FORMAT
 from odoo.tools.misc import format_date
 
 from .limits import MAX_CHART_GROUPS
+from .tools import clean_domain
 
 if TYPE_CHECKING:
     from mcp_server.models.mcp_mixin import mcp_tool
@@ -21,6 +22,9 @@ class AILocalMCP(models.AbstractModel):
     _name = "odoo.ai.assistant.mcp"
     _inherit = "mcp.mixin"
     _description = "Local AI adapter for the supplied MCP Server"
+
+    def _coerce_domain(self, domain):
+        return clean_domain(super()._coerce_domain(domain))
 
     def _resolve_model(self, model):
         if self.env.context.get("odoo_ai_local_mcp") is not _LOCAL_MCP:

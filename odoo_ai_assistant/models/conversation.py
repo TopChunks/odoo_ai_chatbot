@@ -615,6 +615,8 @@ class AIConversation(models.Model):
             if screen:
                 context["current_screen"] = screen
             context.update(self._menus_named())
+        # Who is asking, so "what is my name" or "which company am I in" needs no tool call.
+        context["signed_in"] = {"name": self.env.user.name, "company": self.env.company.name}
         if config.local_tools:
             context["calendar"] = {
                 "today": fields.Date.to_string(fields.Date.context_today(self)),

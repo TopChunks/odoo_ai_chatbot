@@ -24,21 +24,19 @@ from odoo.tools.mimetypes import guess_mimetype
 from odoo.tools.translate import LazyTranslate
 
 if TYPE_CHECKING:
-    from mcp_server.controllers import utils
     from mcp_server.models.mcp_mixin import MAX_EXTRACT_BYTES, MAX_INLINE_BLOB_BYTES, mcp_tool
     from mcp_server.models.mcp_tools_read import _tool_result
     from mcp_server.models.mcp_tools_write import (
-        MAX_UPLOAD_BYTES as MAX_UPLOAD_BYTES, _BLOCKED_METHOD_CALLS, _METHOD_CALL_BLOCKED_MODELS, _json_safe,
+        MAX_UPLOAD_BYTES as MAX_UPLOAD_BYTES, _json_safe,
     )
 else:
-    from odoo.addons.mcp_server.controllers import utils
     from odoo.addons.mcp_server.models.mcp_mixin import MAX_EXTRACT_BYTES, MAX_INLINE_BLOB_BYTES, mcp_tool
     from odoo.addons.mcp_server.models.mcp_tools_read import _tool_result
     from odoo.addons.mcp_server.models.mcp_tools_write import (
-        MAX_UPLOAD_BYTES as MAX_UPLOAD_BYTES, _BLOCKED_METHOD_CALLS, _METHOD_CALL_BLOCKED_MODELS, _json_safe,
+        MAX_UPLOAD_BYTES as MAX_UPLOAD_BYTES, _json_safe,
     )
 
-from .tools import cell_value, data_access_menus
+from .tools import cell_value, clean_domain, data_access_menus
 from .navigation import button_label, eval_view_expression, visible_for
 from .providers import _vocabulary_pattern
 from .limits import (
@@ -67,10 +65,10 @@ _CONFIRMED = object()
 # Technical models the native attachment and activity tools need.
 _NATIVE_ALLOWED_MODELS = frozenset({"ir.attachment", "mail.activity", "mail.activity.type"})
 _BUILTINS = {
-    "list_models", "get_record", "get_fields", "search_records", "aggregate_records",
-    "read_attachment", "list_record_attachments", "list_resource_templates", "get_current_context",
+    "list_models", "get_fields", "search_records", "aggregate_records",
+    "read_attachment", "list_record_attachments",
     "create_record", "create_records", "update_record", "update_records", "delete_record",
-    "call_model_method", "upload_attachment", "post_message", "list_record_messages",
+    "upload_attachment", "post_message", "list_record_messages",
     "press_button",
 }
 _IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
@@ -217,6 +215,10 @@ class NativeMCP(models.AbstractModel):
     _inherit = "mcp.mixin"
     _description = "Confirmed native MCP execution"
 
+    def _coerce_domain(self, domain):
+        # What MCP Server parses, with the terms models often get wrong made valid (tools.clean_domain).
+        return clean_domain(super()._coerce_domain(domain))
+
     def _native(self, confirmed=False):
         """This bridge, allowed to run native tools; data-changing ones only when ``confirmed``."""
         return self.with_context(odoo_ai_native=_NATIVE, odoo_ai_confirmed=_CONFIRMED if confirmed else None)
@@ -290,6 +292,11 @@ class NativeMCP(models.AbstractModel):
             raise AccessError(_("Credential fields cannot be used by AI tools."))
         return super()._resolve_fields(requested, safe)
 
+    def _coerce_fields(self, fields):
+        # "*" is how models often ask for every field: they get MCP Server's default fields.
+        fields = super()._coerce_fields(fields)
+        return None if fields and "*" in fields else fields
+
     def _resolve_binary_field(self, ref):
         if CREDENTIAL_FIELD.search(ref.field):
             raise AccessError(_("Credential fields cannot be used by AI tools."))
@@ -308,31 +315,6 @@ class NativeMCP(models.AbstractModel):
                 entries.append({"model": model, "name": gate.model_id.name, "operations": operations,
                                 "allow_method_calls": gate.allow_method_calls})
         return _tool_result(json.dumps(entries, ensure_ascii=False), {"models": entries})
-
-    def get_current_context(self):
-        self._access()
-        result = super().get_current_context()
-        # MCP Server's text is guidance for an AI; the user sees who they are as a table instead.
-        user = self.env.user
-        result["structuredContent"] = {
-            "title": _("Your account"), "columns": [{"key": "label", "label": _("Detail")},
-                                                    {"key": "value", "label": _("Value")}],
-            "rows": [{"label": label, "value": value} for label, value in (
-                (_("Name"), user.name), (_("Login"), user.login), (_("Company"), self.env.company.name),
-                (_("Timezone"), user.tz or _("Not set")))],
-        }
-        return result
-
-    def list_resource_templates(self):
-        self._access()
-        entries = self._model_entries()
-        data = {
-            "templates": [{"uri_template": "odoo://record/{model}/{id}/{field}"},
-                          {"uri_template": "odoo://attachment/{id}"}],
-            "enabled_models": [item["model"] for item in entries], "total_models": len(entries),
-            "note": _("Use read_attachment to read these resources under your Odoo permissions."),
-        }
-        return _tool_result(json.dumps(data), data)
 
     def _model_entries(self):
         structured = self.list_models().get("structuredContent")
@@ -487,35 +469,6 @@ class NativeMCP(models.AbstractModel):
             lines.append(_("Only the latest %s entries are listed.") % MAX_RECORD_MESSAGES)
         return _tool_result("\n".join(lines), {"model": model, "record_id": record.id, "record": record.display_name,
                                                "messages": entries, "truncated": truncated})
-
-    def _validate_native_method(self, model, recordset, method):
-        if not isinstance(method, str) or not method.strip():
-            raise ValidationError(_("Specify a public business method."))
-        method = method.strip()
-        mapped = utils.map_method_to_operation(method)
-        if mapped:
-            if (method.startswith(("_", "web_")) or method in _BLOCKED_METHOD_CALLS
-                    or any(model == prefix or model.startswith(prefix + ".") for prefix in _METHOD_CALL_BLOCKED_MODELS)
-                    or not callable(getattr(recordset, method, None))):
-                raise AccessError(_("This is not an allowed business method."))
-            self._check_op(model, mapped)
-        else:
-            self._validate_method_call(model, recordset, method)
-        return method
-
-    def call_model_method(self, model, method, record_ids=None, args=None, kwargs=None):
-        self._access(mutation=True)
-        recordset = self._resolve_model(model)
-        gates = self.env["mcp.enabled.model"].sudo()
-        if not gates.is_method_call_enabled(model):
-            raise self._refusal(model, "method_calls")
-        method = self._validate_native_method(model, recordset, method)
-        target = (self._resolve_record_ids_or_raise(model, recordset, record_ids, self._limit_bounds()[1])
-                  if record_ids else recordset)
-        if record_ids:
-            target.check_access("write")
-        raw = getattr(target, method)(*(args or []), **(kwargs or {}))
-        return _tool_result(_("Business method completed."), {"success": True, "result": _json_safe(raw)})
 
     def upload_attachment(self, name, data, model=None, record_id=None, mimetype=None):
         if model is not None or record_id is not None:
@@ -730,10 +683,7 @@ class NativeMCP(models.AbstractModel):
             "name": name,
             # Sharing, confirmation, argument format, record names and upload references are explained once
             # in the system instructions, which are always sent with these tools.
-            "description": entry["description"]
-            + (" It describes the signed-in user, companies and timezone, not the app or screen the user has open. "
-               "Its result is not shared with you; to filter by the signed-in user, use %s instead." % CURRENT_USER
-               if entry["name"] == "get_current_context" else ""),
+            "description": entry["description"],
             "inputSchema": entry["schema"], "strict": False,
         } for name, entry in self._catalogue().items()]
 
@@ -1095,13 +1045,9 @@ class NativeMCP(models.AbstractModel):
         operation = meta["operation"]
         if entry["name"] == "upload_attachment":
             operation = "write"
-        if entry["name"] in {"call_model_method", "press_button"} and not self.env[
+        if entry["name"] == "press_button" and not self.env[
                 "mcp.enabled.model"].sudo().is_method_call_enabled(model):
             raise self._refusal(model, "method_calls")
-        if entry["name"] == "call_model_method":
-            method = executor._validate_native_method(model, recordset, arguments["method"])
-            operation = utils.map_method_to_operation(method)
-            recordset.check_access(operation or "write")
         if operation:
             executor._check_op(model, operation)
         ids = arguments.get("record_ids") or (
@@ -1527,7 +1473,7 @@ class NativeToolRequest(models.Model):
                 "create_record": _("Create"), "create_records": _("Create"),
                 "update_record": _("Update"), "update_records": _("Update"),
                 "delete_record": _("Delete"),
-                "call_model_method": _("Run"), "upload_attachment": _("Upload"),
+                "upload_attachment": _("Upload"),
             }
             verb = action_names.get(self.tool.removeprefix(NATIVE_TOOL_PREFIX), self.tool_label or self.tool)
             headline = _("%(action)s %(model)s", action=verb, model=model_label or self.tool_label or self.tool)
@@ -1569,10 +1515,9 @@ class NativeToolRequest(models.Model):
                                   "local_references": self.resolution_snapshot or []},
                                  ensure_ascii=False, indent=2)
         table = None
-        if self.tool in {"mcp_search_records", "mcp_get_record", "mcp_aggregate_records"} and self.result:
+        if self.tool in {"mcp_search_records", "mcp_aggregate_records"} and self.result:
             structured = self.result.get("structuredContent") or {}
-            rows = {"mcp_search_records": structured.get("records"), "mcp_aggregate_records": structured.get("groups")}.get(
-                self.tool, [structured.get("record")])
+            rows = structured.get("records" if self.tool == "mcp_search_records" else "groups")
             if isinstance(rows, list) and all(isinstance(row, dict) for row in rows):
                 model = (self.arguments or {})["model"]
                 definitions = self.env[model].with_user(self.user_id).fields_get(attributes=["string"])
@@ -1603,12 +1548,6 @@ class NativeToolRequest(models.Model):
                     "total": total, "offset": offset,
                     "has_more": not requested and offset + len(rows) < total,
                 }
-        elif self.result and {"columns", "rows"} <= set(self.result.get("structuredContent") or {}):
-            # A tool that already returns a ready table, such as get_current_context, with an optional note above it.
-            structured = self.result["structuredContent"]
-            description = structured.get("note") or description
-            table = {"kind": "table", "title": structured.get("title", ""), "columns": structured["columns"],
-                     "rows": structured["rows"], "total": len(structured["rows"]), "offset": 0, "has_more": False}
         elif self.tool == "mcp_list_record_messages" and self.result:
             # One row per entry, in the scrolling record table instead of one long block of text.
             structured = self.result.get("structuredContent") or {}

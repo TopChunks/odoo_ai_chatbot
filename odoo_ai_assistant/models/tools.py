@@ -1,3 +1,5 @@
+import ast
+import contextlib
 import json
 import math
 from datetime import date, datetime
@@ -129,6 +131,25 @@ def parse_tool_arguments(arguments):
     return arguments
 
 
+def clean_domain(domain):
+    """A domain's terms as models often write them, made valid: a term sent as text, and the values of an
+    "in" / "not in" term spread over the term or given as one value instead of a list. Spread values with a
+    bracket are a list the model broke apart, so a value may be lost: that term is left for Odoo to refuse,
+    and the AI is asked to write it again, instead of searching with part of the list."""
+    terms = []
+    for term in domain:
+        if isinstance(term, str) and term.strip().startswith(("[", "(")):
+            with contextlib.suppress(ValueError, SyntaxError):
+                term = ast.literal_eval(term.strip())
+        if isinstance(term, (list, tuple)) and len(term) >= 3 and term[1] in ("in", "not in"):
+            spread = len(term) > 3
+            values = term[2:] if spread else term[2]
+            if not (spread and any("[" in str(value) or "]" in str(value) for value in values)):
+                term = [term[0], term[1], list(values) if isinstance(values, (list, tuple)) else [values]]
+        terms.append(term)
+    return terms
+
+
 def execute_tool(env, name, arguments):
     arguments = parse_tool_arguments(arguments)
     if not isinstance(arguments, dict):
@@ -162,7 +183,8 @@ def execute_chart(env, arguments):
         if key in {"model", "group_by", "interval", "operation", "measure", "domain", "chart_type", "limit", "title"}
     }}
     name, group, interval = arguments.get("model"), arguments.get("group_by"), arguments["interval"]
-    operation, measure, domain = arguments.get("operation"), arguments["measure"], arguments["domain"]
+    operation, measure = arguments.get("operation"), arguments["measure"]
+    domain = env["odoo.ai.assistant.mcp"]._coerce_domain(arguments["domain"])
     chart, title, limit = arguments.get("chart_type"), arguments.get("title"), arguments.get("limit")
     if name not in chart_models(env):
         raise AccessError(_("'%(model)s' is not available for charts. An administrator can enable reading it "
