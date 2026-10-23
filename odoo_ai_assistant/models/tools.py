@@ -136,7 +136,14 @@ def clean_domain(domain):
     """A domain's terms as models often write them, made valid: a term sent as text, and the values of an
     "in" / "not in" term spread over the term or given as one value instead of a list. Spread values with a
     bracket are a list the model broke apart, so a value may be lost: that term is left for Odoo to refuse,
-    and the AI is asked to write it again, instead of searching with part of the list."""
+    and the AI is asked to write it again, instead of searching with part of the list. A domain sent as text is
+    read first; anything that is not a list is returned as it is, for MCP Server to refuse."""
+    for parse in (json.loads, ast.literal_eval):  # as MCP Server reads a domain sent as text
+        if isinstance(domain, str):
+            with contextlib.suppress(ValueError, SyntaxError):
+                domain = parse(domain.strip())
+    if not isinstance(domain, (list, tuple)):
+        return domain
     terms = []
     for term in domain:
         if isinstance(term, str) and term.strip().startswith(("[", "(")):
@@ -185,7 +192,7 @@ def execute_chart(env, arguments):
     }}
     name, group, interval = arguments.get("model"), arguments.get("group_by"), arguments["interval"]
     operation, measure = arguments.get("operation"), arguments["measure"]
-    domain = env["odoo.ai.assistant.mcp"]._coerce_domain(arguments["domain"])
+    domain = clean_domain(arguments["domain"])
     chart, title, limit = arguments.get("chart_type"), arguments.get("title"), arguments.get("limit")
     if name not in chart_models(env):
         raise AccessError(_("'%(model)s' is not available for charts. An administrator can enable reading it "

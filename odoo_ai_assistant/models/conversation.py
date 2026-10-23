@@ -36,6 +36,7 @@ from .navigation import (
 )
 from .native_mcp import (
     _IMAGE_TYPES, _UPLOAD_REFERENCE, MAX_UPLOAD_BYTES, NATIVE_TOOL_PREFIX, PRESS_TOOL, DirectReply,
+    mcp_server_missing,
 )
 
 
@@ -68,6 +69,9 @@ class AIConversation(models.Model):
         config = self.env["odoo.ai.assistant.config"]._configuration()
         if not self._enabled_for_user(config):
             raise AccessError(_("AI Agent is disabled for your user. Contact your administrator."))
+        if mcp_server_missing(self.env):
+            raise UserError(_("AI Agent does not work with the installed MCP Server version. "
+                              "Contact your administrator."))
         return config
 
     def _owned(self):

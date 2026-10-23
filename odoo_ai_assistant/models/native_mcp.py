@@ -71,6 +71,29 @@ _BUILTINS = {
     "upload_attachment", "post_message", "list_record_messages",
     "press_button",
 }
+# MCP Server methods this module overrides or calls, as in MCP Server 19.0.2.2.0. A version that renames one would
+# otherwise quietly skip an override (some are permission checks) or break a tool, so the AI stops instead.
+_MCP_SERVER_METHODS = {
+    "mcp.mixin": (
+        "_attachment_auto_result", "_attachment_download_link", "_attachment_headline", "_attachment_inline_text",
+        "_attachment_link_result", "_attachment_read_allowed", "_attachment_structured", "_check_op",
+        "_extract_attachment_text", "_get_mcp_tools", "_limit_bounds", "_load_target_bytes", "_mcp_live_input_schema",
+        "_resolve_attachment_for_tool", "_resolve_binary_field", "_resolve_fields", "_resolve_model",
+        "_resolve_read_attachment_target", "_resolve_record_ids_or_raise", "list_models", "upload_attachment",
+    ),
+    "mcp.custom.tool": ("_parsed_input_schema", "_run_tool", "_user_can_run", "_visible_tools"),
+    "mcp.enabled.model": ("check_model_operation_enabled", "is_method_call_enabled", "is_model_enabled"),
+}
+
+
+def mcp_server_missing(env):
+    """What this module needs from the installed MCP Server but does not find there; empty when compatible."""
+    missing = [f"{model}.{name}" for model, names in _MCP_SERVER_METHODS.items()
+               for name in names if model not in env or not hasattr(env[model], name)]
+    if "mcp.mixin._get_mcp_tools" not in missing:
+        tools = env["odoo.ai.assistant.native.mcp"]._get_mcp_tools()
+        missing += [f"tool {name}" for name in sorted(_BUILTINS - set(tools))]
+    return missing
 _IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 # Native MCP tools are offered to the AI provider as mcp_<tool name>.
 NATIVE_TOOL_PREFIX = "mcp_"
@@ -215,9 +238,11 @@ class NativeMCP(models.AbstractModel):
     _inherit = "mcp.mixin"
     _description = "Confirmed native MCP execution"
 
-    def _coerce_domain(self, domain):
-        # What MCP Server parses, with the terms models often get wrong made valid (tools.clean_domain).
-        return clean_domain(super()._coerce_domain(domain))
+    def _register_hook(self):
+        super()._register_hook()
+        if missing := mcp_server_missing(self.env):
+            _logger.error("AI Agent is not compatible with the installed MCP Server version; missing: %s",
+                          ", ".join(missing))
 
     def _native(self, confirmed=False):
         """This bridge, allowed to run native tools; data-changing ones only when ``confirmed``."""
@@ -291,11 +316,6 @@ class NativeMCP(models.AbstractModel):
         if requested and any(CREDENTIAL_FIELD.search(name) for name in requested):
             raise AccessError(_("Credential fields cannot be used by AI tools."))
         return super()._resolve_fields(requested, safe)
-
-    def _coerce_fields(self, fields):
-        # "*" is how models often ask for every field: they get MCP Server's default fields.
-        fields = super()._coerce_fields(fields)
-        return None if fields and "*" in fields else fields
 
     def _resolve_binary_field(self, ref):
         if CREDENTIAL_FIELD.search(ref.field):
@@ -828,7 +848,7 @@ class NativeMCP(models.AbstractModel):
                     if isinstance(term, (list, tuple)) and term:
                         if not isinstance(term[0], str) or CREDENTIAL_FIELD.search(term[0]):
                             raise AccessError(_("Credential fields cannot be used in local lookups."))
-                records = recordset.search(executor._coerce_domain(reference["domain"]), limit=2)
+                records = recordset.search(clean_domain(reference["domain"]), limit=2)
                 if len(records) != 1:
                     raise UserError(_("%(count)s %(model)s records match this description, so no action was "
                                       "prepared. Describe it so that exactly one matches.") % {
@@ -1244,6 +1264,12 @@ class NativeToolRequest(models.Model):
         bridge = conversation.env["odoo.ai.assistant.native.mcp"]
         plan = arguments
         arguments, dependencies = bridge._resolve_plan(tool, plan)
+        # Filters as models often write them, made valid once references are resolved (tools.clean_domain); a
+        # field list with "*" (every field) reads MCP Server's default fields.
+        if "domain" in arguments:
+            arguments["domain"] = clean_domain(arguments["domain"])
+        if isinstance(arguments.get("fields"), list) and "*" in arguments["fields"]:
+            del arguments["fields"]
         entry = bridge._entry(tool, arguments)
         context = conversation.env.context
         if (entry["operation"] == "create" and not entry["custom_id"] and context.get("odoo_ai_provider_plan")
