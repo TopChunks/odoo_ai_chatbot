@@ -8,7 +8,7 @@ import logging
 import re
 from urllib.parse import urlsplit
 from collections.abc import Mapping
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from jsonschema.validators import validator_for
@@ -18,7 +18,7 @@ from lxml import etree
 from odoo import api, fields, models, _
 from odoo.exceptions import AccessError, MissingError, UserError, ValidationError
 from odoo.service.model import get_public_method
-from odoo.tools import SQL, config as server_config, formatLang, html2plaintext
+from odoo.tools import SQL, config as server_config, html2plaintext
 from odoo.tools.image import image_process
 from odoo.tools.mimetypes import guess_mimetype
 from odoo.tools.translate import LazyTranslate
@@ -43,7 +43,7 @@ from .navigation import button_label, eval_view_expression, visible_for
 from .providers import _vocabulary_pattern
 from .limits import (
     CREDENTIAL_FIELD, CURRENT_USER, MAX_ATTACHMENT_TEXT_CHARS, MAX_FIELD_SUGGESTIONS, MAX_AUDIT_TOOL_NAME_CHARS, MAX_IMAGE_CHARS, MAX_LINE_FIELD_EXAMPLES,
-    MAX_PLAN_DEPTH, MAX_RECORD_MESSAGES, MAX_REFERENCE_TERMS, MAX_SUMMARY_NAMES, MAX_REQUEST_DETAIL_CHARS, MAX_SCHEMA_ERROR_CHARS, MAX_SHARED_EVIDENCE_CHARS,
+    MAX_PLAN_DEPTH, MAX_RECORD_MESSAGES, MAX_REFERENCE_TERMS, MAX_REQUEST_DETAIL_CHARS, MAX_SCHEMA_ERROR_CHARS, MAX_SHARED_EVIDENCE_CHARS,
     MAX_SHARED_IMAGES, MAX_TOOL_ARGUMENT_CHARS, NATIVE_RATE_LOCK_NAMESPACE, STAGED_FILE_LIFETIME,
     TOOL_REQUEST_LIFETIME, is_restricted_model,
 )
@@ -70,7 +70,7 @@ _BUILTINS = {
     "list_models", "get_record", "get_fields", "search_records", "aggregate_records",
     "read_attachment", "list_record_attachments", "list_resource_templates", "get_current_context",
     "create_record", "create_records", "update_record", "update_records", "delete_record",
-    "call_model_method", "upload_attachment", "post_message", "list_record_messages", "rate_sales_executives",
+    "call_model_method", "upload_attachment", "post_message", "list_record_messages",
     "press_button",
 }
 _IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
@@ -487,203 +487,6 @@ class NativeMCP(models.AbstractModel):
             lines.append(_("Only the latest %s entries are listed.") % MAX_RECORD_MESSAGES)
         return _tool_result("\n".join(lines), {"model": model, "record_id": record.id, "record": record.display_name,
                                                "messages": entries, "truncated": truncated})
-
-    @mcp_tool(
-        name="rate_sales_executives",
-        title="Rate Sales Executives",
-        description=(
-            "Rate salespeople for a period against the user's targets: weighted score, misses and who needs "
-            "coaching. Use it for any sales performance or coaching question instead of computing ratings yourself. "
-            "Targets come only from the user; if they gave none, ask which measures and targets to use."
-        ),
-        input_schema={"type": "object", "properties": {
-            "date_from": {"type": "string", "description": "YYYY-MM-DD; default first day of this month."},
-            "date_to": {"type": "string", "description": "YYYY-MM-DD; default today."},
-            "salesperson": {"type": ["string", "array"], "items": {"type": "string"},
-                            "description": "Exact name(s); omit for everyone."},
-            "team": {"type": "string", "description": "Exact sales team name; omit for all."},
-            "targets": {"type": "object", "description": "Only the measures the user named.", "properties": {
-                "win_rate": {"type": "number", "minimum": 0, "maximum": 100, "description": "% of closed deals won"},
-                "revenue": {"type": "number", "minimum": 0, "description": "won per salesperson per month"},
-                "close_days": {"type": "number", "minimum": 0, "description": "average days to win; fewer is better"},
-                "activities": {"type": "number", "minimum": 0, "maximum": 100, "description": "% done by deadline"},
-                "contact": {"type": "number", "exclusiveMinimum": 0,
-                            "description": "days within which open deals had an email, note or done activity"},
-            }, "additionalProperties": False},
-            "weights": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0},
-                        "description": "By target key; default 1."},
-            "min_deals": {"type": "integer", "minimum": 0,
-                          "description": "Closed deals needed to score win rate, revenue and close days."},
-            "revenue_from_teams": {"type": "boolean",
-                                   "description": "Revenue target from each team's invoicing target."},
-            "owner_at_close": {"type": "boolean", "description": "Credit deals to their owner at closing."},
-        }, "additionalProperties": False},
-        operation="read",
-        readOnlyHint=True,
-    )
-    def _rate_sales_executives(self, date_from=None, date_to=None, salesperson=None, team=None, targets=None,
-                               weights=None, min_deals=0, revenue_from_teams=False, owner_at_close=False):
-        if "crm.lead" not in self.env:
-            raise UserError(_("Sales ratings need the CRM app."))
-        today = fields.Date.context_today(self)
-        start, end = fields.Date.to_date(date_from) or today.replace(day=1), fields.Date.to_date(date_to) or today
-        if start > end:
-            raise UserError(_("The period must start before it ends."))
-        # The rules come from the user's request: the AI asks for them rather than inventing targets.
-        targets, team_targets = targets or {}, bool(revenue_from_teams)
-        if not (targets or team_targets):
-            raise UserError(_("Ask which measures and targets to rate on: win rate (%), monthly won revenue, days to "
-                              "close, activities on time (%) or a customer contact window (days)."))
-        requested = [name.strip() for name in ([salesperson] if isinstance(salesperson, str) else salesperson or [])
-                     if name.strip()]
-        names = {name.casefold() for name in requested}
-        domain = [("type", "=", "opportunity"), ("user_id", "!=", False)]
-        if team:
-            domain.append(("team_id.name", "=ilike", team.strip()))
-        # Every model read here must be allowed in MCP Server; sales teams only when a team filter or target uses them.
-        # The opportunities' own chatter (messages, tracked changes) is covered by the opportunity permission.
-        if team or team_targets:
-            self._check_op("crm.team", "read")
-        # Searched as the user: CRM's own rules decide whose deals each user may see.
-        opportunities = self._check_op("crm.lead", "read").with_context(active_test=False).search(domain)
-        # Measured within the period: up to its end, or up to today for a period still running.
-        period_end = min(end, today)
-        midnight = lambda day: datetime.combine(day, datetime.min.time())
-        end_moment = midnight(period_end) + timedelta(days=1)
-        closed = opportunities.filtered(lambda deal: deal.won_status in ("won", "lost") and deal.date_closed and (
-            midnight(start) <= deal.date_closed < midnight(end) + timedelta(days=1)))
-        owners = {deal: deal.user_id for deal in closed}
-        if owner_at_close and closed:
-            # Odoo tracks salesperson changes: the first change after closing still holds the owner at closing.
-            # sudo: tracking values are readable by administrators only; these are the salesperson changes of
-            # opportunities this user may read.
-            settled = set()
-            for change in self.env["mail.tracking.value"].sudo().search([
-                ("field_id", "=", self.env["ir.model.fields"]._get("crm.lead", "user_id").id),
-                ("mail_message_id.model", "=", "crm.lead"), ("mail_message_id.res_id", "in", closed.ids),
-            ], order="id"):
-                deal = closed.browse(change.mail_message_id.res_id)
-                if deal not in settled and change.mail_message_id.date > deal.date_closed:
-                    owners[deal] = self.env["res.users"].browse(change.old_value_integer).exists() or deal.user_id
-                    settled.add(deal)
-        open_at_end = opportunities.filtered(lambda deal: deal.create_date < end_moment and (
-            (deal.won_status == "pending" and deal.active) or (deal.date_closed and deal.date_closed >= end_moment)))
-        contacted = set(self.env["mail.message"].search([
-            ("model", "=", "crm.lead"), ("res_id", "in", open_at_end.ids), ("date", "<", end_moment),
-            ("date", ">=", end_moment - timedelta(days=targets["contact"])),
-            # Emails, logged notes and completed activities such as calls and meetings.
-            "|", ("message_type", "in", ("email", "comment")), ("mail_activity_type_id", "!=", False),
-        ]).mapped("res_id")) if "contact" in targets else set()
-        due = self.env["mail.activity"]
-        if "activities" in targets:
-            # Activities due in the period, done or not (Odoo keeps done ones archived);
-            # one due today may still be done.
-            due = self._check_op("mail.activity", "read").with_context(active_test=False).search([
-                ("res_model", "=", "crm.lead"), ("res_id", "in", opportunities.ids),
-                ("date_deadline", ">=", start), ("date_deadline", "<=", period_end),
-            ]).filtered(lambda activity: activity.date_done or activity.date_deadline < today)
-        # Revenue targets cover only the part of the period that has happened: future months cannot be earned yet.
-        months = ((period_end - start).days + 1) / (365.25 / 12)
-
-        def revenue_target(user):
-            sales_team = user.sale_team_id
-            if team_targets and getattr(sales_team, "invoiced_target", 0):
-                return sales_team.invoiced_target / len(sales_team.member_ids or user) * months
-            return targets.get("revenue", 0) * months
-
-        percent = lambda value: "%d%%" % round(value * 100)
-        money = lambda value: formatLang(self.env, value, currency_obj=self.env.company.currency_id, rounding_unit="units")
-        # (key, label, target or 0 when unscored, lower is better, format); a contact window is met when every open
-        # opportunity was contacted within it.
-        available = (
-            ("win_rate", _("Win rate"), targets.get("win_rate", 0) / 100, False, percent),
-            ("revenue", _("Won revenue"), targets.get("revenue", 0) * months, False, money),
-            ("close_days", _("Days to close"), targets.get("close_days", 0), True, round),
-            ("activities", _("Activities on time"), targets.get("activities", 0) / 100, False, percent),
-            ("contact", _("Recent contact"), 1.0, False, percent),
-        )
-        # Only the measures the user asked for are shown and scored, each weighted as they said (default 1).
-        measures = [(key, label, target, (weights or {}).get(key, 1), lower, show)
-                    for key, label, target, lower, show in available
-                    if key in targets or (key == "revenue" and team_targets)]
-        # Results of closed deals: unfair below the minimum, so shown but not scored.
-        needs_deals = {"win_rate", "revenue", "close_days"}
-        # Each target is shown once, in its column header; team revenue targets differ per row, so they go there.
-        columns = {"salesperson": _("Salesperson"), "closed": _("Closed deals"), **{
-            key: _("%(measure)s (target %(target)s)", measure=label, target=show(target))
-            if target and not (key == "revenue" and team_targets) else label
-            for key, label, target, _weight, _lower, show in measures
-        }, "score": _("Score (0–100)"), "below": _("Needs attention")}
-        rows, attention = [], {}
-        users = (self.env["res.users"].union(*owners.values()) | open_at_end.user_id).sorted("name")
-        for user in users.filtered(lambda user: not names or user.name.casefold() in names):
-            mine = [deal for deal, owner in owners.items() if owner == user]
-            won = [deal for deal in mine if deal.won_status == "won"]
-            deals = open_at_end.filtered(lambda deal: deal.user_id == user)
-            assigned = due.filtered(lambda activity: activity.user_id == user)
-            # Measured values; None without data.
-            values = {
-                "win_rate": len(won) / len(mine) if mine else None,
-                "revenue": sum(deal.expected_revenue for deal in won),
-                "close_days": sum(deal.day_close for deal in won) / len(won) if won else None,
-                "activities": len(assigned.filtered(lambda activity: activity.date_done
-                                                   and activity.date_done <= activity.date_deadline)) / len(assigned)
-                if assigned else None,
-                "contact": len(set(deals.ids) & contacted) / len(deals) if deals else None,
-            }
-            targets = {"revenue": revenue_target(user)} if team_targets else {}
-            cells, scored, below = {}, [], []
-            for key, label, target, weight, lower, show in measures:
-                target = targets.get(key, target)
-                value = values[key]
-                if value is None:
-                    cells[key] = "–"
-                elif key in targets:
-                    cells[key] = _("%(value)s of %(target)s", value=show(value), target=show(target))
-                else:
-                    cells[key] = show(value)
-                if value is None or not target or not weight or (key in needs_deals and len(mine) < min_deals):
-                    continue
-                ratio = min((target / value if value else 1) if lower else value / target, 1)
-                scored.append((weight, ratio))
-                if ratio < 1:
-                    below.append(label)
-            rows.append({
-                "salesperson": user.name, "closed": len(mine), **cells,
-                "score": round(100 * sum(weight * ratio for weight, ratio in scored) / sum(weight for weight, _r in scored))
-                if scored else _("Not enough data"),
-                "below": ", ".join(below) or (_("On target") if scored else "–"),
-            })
-            attention[user.name] = below
-        # A plain-language verdict written by Odoo from the scores above, so nothing is sent to the AI provider.
-        ranked = [row for row in rows if isinstance(row["score"], int)]
-        lowest = [row for row in ranked if row["score"] == min((row["score"] for row in ranked), default=None)]
-        highest = [row for row in ranked if row["score"] == max((row["score"] for row in ranked), default=None)]
-        listed = lambda group: ", ".join(row["salesperson"] for row in group[:MAX_SUMMARY_NAMES]) + (
-            _(" and %s more", len(group) - MAX_SUMMARY_NAMES) if len(group) > MAX_SUMMARY_NAMES else "")
-        notes = []
-        if lowest:
-            notes.append(_("Needs coaching most: %(names)s (score %(score)s).", names=listed(lowest), score=lowest[0]["score"])
-                         if len(ranked) > 1 else
-                         _("%(name)s scores %(score)s.", name=lowest[0]["salesperson"], score=lowest[0]["score"]))
-            if len(lowest) == 1 and attention[lowest[0]["salesperson"]]:
-                notes.append(_("Below target: %s.") % ", ".join(attention[lowest[0]["salesperson"]]))
-        if highest and highest[0]["score"] > lowest[0]["score"]:
-            notes.append(_("Strongest: %(names)s (score %(score)s).", names=listed(highest), score=highest[0]["score"]))
-        if len(rows) > len(ranked):
-            notes.append(_("Not enough data to score: %s.") % listed([row for row in rows if row not in ranked]))
-        found = {row["salesperson"].casefold() for row in rows}
-        if missing := [name for name in requested if name.casefold() not in found]:
-            notes.append(_("No opportunities found for: %s.") % ", ".join(missing))
-        note = " ".join(notes)
-        title = _("Sales ratings %(start)s to %(end)s", start=start, end=end)
-        if min_deals:
-            title += _(" · win rate, revenue and days to close count from %s closed deals", min_deals)
-        lines = [title, note] + ["%s: %s. %s" % (row["salesperson"], row["score"], row["below"]) for row in rows]
-        return _tool_result("\n".join(lines) if rows else _("No salesperson has opportunities in this period."), {
-            "title": title, "note": note,
-            "columns": [{"key": key, "label": label} for key, label in columns.items()], "rows": rows,
-        })
 
     def _validate_native_method(self, model, recordset, method):
         if not isinstance(method, str) or not method.strip():
@@ -1801,7 +1604,7 @@ class NativeToolRequest(models.Model):
                     "has_more": not requested and offset + len(rows) < total,
                 }
         elif self.result and {"columns", "rows"} <= set(self.result.get("structuredContent") or {}):
-            # A tool that already returns a ready table, such as rate_sales_executives, with an optional note above it.
+            # A tool that already returns a ready table, such as get_current_context, with an optional note above it.
             structured = self.result["structuredContent"]
             description = structured.get("note") or description
             table = {"kind": "table", "title": structured.get("title", ""), "columns": structured["columns"],

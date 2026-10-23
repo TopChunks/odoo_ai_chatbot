@@ -68,8 +68,6 @@ MAX_FIELD_HINT_NAMES = 150
 MAX_LINE_FIELD_EXAMPLES = 40
 # Newest chatter entries of one record returned by list_record_messages.
 MAX_RECORD_MESSAGES = 100
-# Names listed in the sales rating summary before "and N more".
-MAX_SUMMARY_NAMES = 3
 
 # Native tool requests: preview lifetime, staged-file lifetime and plan validation.
 TOOL_REQUEST_LIFETIME = timedelta(minutes=30)

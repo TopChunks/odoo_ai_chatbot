@@ -57,7 +57,7 @@ records**. It works with OpenAI, Anthropic Claude, Google Gemini and OpenRouter,
 | *Products sold in Bengaluru this month that are below their reorder minimum* | **Linked searches** in one answer: the second search uses the records the first found |
 | *Compare Alpha and Beta on confirmed sales this quarter* | Totals per customer, calculated by Odoo |
 | *Pie chart of sales by category* · *Top 10 products by stock* · *Sales trend for the last 6 months* | A **chart** with a **Total** row, **top N + Others**, months without sales shown as 0, **Export as PDF / Excel** |
-| *How is my sales team doing? Win rate 30%, revenue 50,000 a month* | A **sales rating** per salesperson, with who needs coaching |
+| *How is my sales team doing this month?* | Won revenue and deals per salesperson, as a table or chart |
 | *Show the history of opportunity Office chairs* | Notes, emails and tracked changes as a table |
 | *Create a contact named Zeta Wheels* · *Set the revenue of Kids Range to 25,000* | A **preview** to Confirm |
 | *Confirm quotation S00102* · *Register the payment for invoice INV/2026/0003* | A preview of pressing that **button**, including the form Odoo opens |
@@ -312,7 +312,7 @@ odoo_ai_assistant/
 │   ├── conversation.py   chat flow · request check · tool dispatch and retry · history · files · export
 │   ├── providers.py      OpenAI / Claude / Gemini / OpenRouter · AI instructions · model lists · token counts
 │   ├── native_mcp.py     MCP tools for the chat · previews and Confirm · name resolution · button presses ·
-│   │                     sales ratings · record history · result cards · audit
+│   │                     record history · result cards · audit
 │   ├── tools.py          chart · app structure · screen details · instance info · table cells
 │   ├── navigation.py     the user's apps, menus, screens and buttons
 │   ├── mcp_bridge.py     read-only grouping for charts
