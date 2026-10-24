@@ -267,7 +267,11 @@ def execute_chart(env, arguments):
               else term for term in domain]
     model = env[name]
     named = clean_field_names(model, {"domain": domain, "groupby": [group], "aggregates": [measure]})
-    domain, group, measure = report_filters(model, named["domain"]), named["groupby"][0], named["aggregates"][0]
+    domain, group, measure = named["domain"], named["groupby"][0], named["aggregates"][0]
+    if operation == "count":  # documents are counted where Odoo's dashboards count them
+        model, named = count_on_report(model, {"domain": domain, "groupby": [group], "aggregates": ["__count"]})
+        name, domain, group = model._name, named["domain"], named["groupby"][0]
+    domain = report_filters(model, domain, [group])
     definitions = model.fields_get(attributes=["string", "type", "groupable", "aggregator"])
 
     def groupable(field):
@@ -286,7 +290,7 @@ def execute_chart(env, arguments):
     if operation == "count":
         if measure:
             raise ValidationError(_("Leave measure empty for a count chart."))
-        aggregate = "__count"
+        aggregate = named["aggregates"][0]
     else:
         definition = definitions.get(measure) or {}
         if definition.get("type") not in _NUMERIC_TYPES or not definition.get("aggregator") \
@@ -357,11 +361,42 @@ def execute_chart(env, arguments):
             "total": total, "total_shown": None if total is None else cell_value(model, measure, total)}
 
 
-def report_filters(model, domain):
+def count_on_report(model, arguments):
+    """A count of ``model``'s documents, records with a status such as orders and invoices (``arguments`` of a
+    summary: domain, groupby, aggregates, order), moved to the enabled Odoo report that counts them as Odoo's
+    dashboards do: one linked to ``model`` (Sales Analysis by its order reference) with every field the count uses,
+    the same or, for a date, the field with the same label. Documents are then counted once each, without empty
+    ones. Returns the model and arguments to use, unchanged otherwise."""
+    if not model._auto or "state" not in model._fields or any(
+            spec != "__count" for spec in arguments.get("aggregates") or ["__count"]):
+        return model, arguments
+    env = model.env
+    used = {str(spec).split(":")[0] for spec in arguments.get("groupby") or []} | {
+        term[0].split(".")[0] for term in arguments.get("domain") or [] if isinstance(term, (list, tuple)) and term
+        and isinstance(term[0], str)}
+    for report in (env[name] for name in chart_models(env) if not env[name]._auto):
+        link = next((field.name for field in report._fields.values() if field.comodel_name == model._name or (
+            field.type == "reference" and model._name in dict(field._description_selection(env)))), None)
+        moved = clean_field_names(report, json.loads(json.dumps(dict(arguments, model=report._name))))
+        same = {name: report._fields.get(name) for name in used}
+        if link and all(name in model._fields and (field and field.type == model._fields[name].type
+                                                   or model._fields[name].type in ("date", "datetime"))
+                        for name, field in same.items()) and all(
+                isinstance(term, str) or str(term[0]).split(".")[0] in report._fields for term in moved.get("domain") or []) \
+                and all(str(spec).split(":")[0] in report._fields for spec in moved.get("groupby") or []):
+            moved["aggregates"] = [f"{link}:count_distinct"]
+            if moved.get("order"):
+                moved["order"] = re.sub(r"__count\b", f"{link}:count_distinct", moved["order"])
+            return report, moved
+    return model, arguments
+
+
+def report_filters(model, domain, groupby=()):
     """``domain`` with the filters an Odoo report opens with from its own menu (Sales Analysis: confirmed sales,
-    not quotations or cancelled ones), where ``domain`` has no condition on their fields, so figures match Odoo's
-    dashboards. Read from the menu's action and search view, never written here; date filters are left out, as the
-    question sets the period, and so are filters of other kinds than plain conditions."""
+    not quotations or cancelled ones), where neither ``domain`` nor ``groupby`` ("by status") uses their fields,
+    so figures match Odoo's dashboards. Read from the menu's action and search view, never written here; date
+    filters are left out, as the question sets the period, and so are filters of other kinds than plain
+    conditions."""
     if model._auto or not isinstance(domain, list):
         return domain
     env = model.env
@@ -374,7 +409,7 @@ def report_filters(model, domain):
         context = safe_eval(action.context or "{}", {"active_id": False, "active_ids": [], "uid": env.uid})
         search = etree.fromstring(model.get_view(action.search_view_id.id or None, "search")["arch"])
         used = {term[0].split(".")[0] for term in domain if isinstance(term, (list, tuple)) and term
-                and isinstance(term[0], str)}
+                and isinstance(term[0], str)} | {str(spec).split(":")[0] for spec in groupby}
         for key, value in context.items():
             node = search.find(f".//filter[@name='{key.removeprefix('search_default_')}']") \
                 if key.startswith("search_default_") and value else None

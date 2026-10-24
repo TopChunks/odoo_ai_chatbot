@@ -37,8 +37,8 @@ else:
     )
 
 from .tools import (
-    based_on, cell_value, clean_domain, clean_field_names, clean_order, data_access_menus, report_filters,
-    summary_answer,
+    based_on, cell_value, clean_domain, clean_field_names, clean_order, count_on_report, data_access_menus,
+    report_filters, summary_answer,
 )
 from .navigation import button_label, eval_view_expression, visible_for
 from .providers import _vocabulary_pattern
@@ -1283,8 +1283,11 @@ class NativeToolRequest(models.Model):
                                              arguments.get("aggregates") or [])
         if isinstance(arguments.get("model"), str) and arguments["model"] in conversation.env:
             arguments = clean_field_names(conversation.env[arguments["model"]], arguments)
+            if tool == "mcp_aggregate_records":
+                arguments = count_on_report(conversation.env[arguments["model"]], arguments)[1]
             if tool in ("mcp_search_records", "mcp_aggregate_records"):
-                arguments["domain"] = report_filters(conversation.env[arguments["model"]], arguments.get("domain") or [])
+                arguments["domain"] = report_filters(conversation.env[arguments["model"]], arguments.get("domain") or [],
+                                                     arguments.get("groupby") or [])
         if isinstance(arguments.get("fields"), list) and "*" in arguments["fields"]:
             del arguments["fields"]
         entry = bridge._entry(tool, arguments)
@@ -1585,7 +1588,7 @@ class NativeToolRequest(models.Model):
                     # Aggregate keys are "field", "field:sum" or "field:month", and Odoo's "__count".
                     name, _sep, operator = key.partition(":")
                     text = definitions.get(name, {}).get("string") or (_("Count") if name == "__count" else name)
-                    return "%s (%s)" % (text, operator.replace("_", " ")) if operator else text
+                    return "%s (%s)" % (text, _("count") if operator == "count_distinct" else operator) if operator else text
 
                 # Aggregates list their groups before their measures.
                 keys = list(dict.fromkeys(structured.get("groupby", []) + structured.get("aggregates", [])
