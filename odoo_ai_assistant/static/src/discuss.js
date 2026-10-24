@@ -37,9 +37,13 @@ patch(ChatWindow.prototype, {
         // An AI conversation opens in the AI panel (its cards, charts and tables), never as a plain chat window,
         // however its window or bubble got there (restored from an earlier visit or another tab).
         const ai = this.store.env.services.odoo_ai;
-        if (this.thread && isAIConversation(ai.state, this.thread)) {
+        const thread = this.thread;  // closing the window unlinks it
+        if (thread && isAIConversation(ai.state, thread)) {
             await this.close();
-            return ai.open(ai.state.conversations.find((conversation) => conversation.channel_id === this.thread.id));
+            await ai.refresh();  // a conversation started since the page loaded is listed too
+            const conversation = ai.state.conversations.find((entry) => entry.channel_id === thread.id);
+            // Never a new chat in its place: without the conversation listed, the AI panel shows its current one.
+            return ai.open(conversation || ai.state.current || ai.state.conversations[0]);
         }
         return super.open(...arguments);
     },
