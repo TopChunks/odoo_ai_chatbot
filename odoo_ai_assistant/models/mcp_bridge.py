@@ -45,20 +45,21 @@ class AILocalMCP(models.AbstractModel):
         return recordset
 
     @mcp_tool(
-        name="ai_group_records", description="Group records by one field locally for a chart.",
+        name="ai_group_records", description="Group records by one field locally for a report.",
         input_schema={"type": "object", "properties": {
-            "model": {"type": "string"}, "domain": {"type": "array"},
-            "group": {"type": "string"}, "measure": {"type": "string"}, "smallest": {"type": "boolean"},
-        }, "required": ["model", "domain", "group", "measure"], "additionalProperties": False},
+            "model": {"type": "string"}, "domain": {"type": "array"}, "group": {"type": "string"},
+            "measures": {"type": "array", "items": {"type": "string"}}, "smallest": {"type": "boolean"},
+        }, "required": ["model", "domain", "group", "measures"], "additionalProperties": False},
         operation="read", readOnlyHint=True,
     )
     @api.model
-    def _ai_group_records(self, model, domain, group, measure, smallest=False):
+    def _ai_group_records(self, model, domain, group, measures, smallest=False):
         model_rs = self._check_op(model, "read")
-        # Largest (or smallest) groups first, periods in their order, so the groups kept within the limit are those.
+        # Largest (or smallest) groups first by the first measure, periods in their order, so the groups kept within
+        # the limit are those.
         grouped = model_rs._read_group(
-            domain, groupby=[group], aggregates=[measure], limit=MAX_CHART_GROUPS + 1,
-            order=None if ":" in group else f"{measure} {'asc' if smallest else 'desc'}",
+            domain, groupby=[group], aggregates=measures, limit=MAX_CHART_GROUPS + 1,
+            order=None if ":" in group else f"{measures[0]} {'asc' if smallest else 'desc'}",
         )
         field = model_rs._fields[group.split(":")[0]]
         if ":" in group:
@@ -66,13 +67,15 @@ class AILocalMCP(models.AbstractModel):
             start = next((term[2] for term in domain if isinstance(term, (list, tuple)) and len(term) == 3
                           and term[0] == field.name and term[1] in (">=", ">")), False)
             # Without tz: _read_group returns the periods as naive local dates, so the filled ones must be naive too.
-            grouped = [(row[group], row[measure]) for row in model_rs.with_context(tz=None)._read_group_fill_temporal(
-                [{group: key, measure: value} for key, value in grouped], [group], {measure: measure},
-                fill_from=fields.Datetime.to_datetime(start) if start and field.type == "datetime" else start)]
+            grouped = [(row[group], *(row[measure] for measure in measures))
+                       for row in model_rs.with_context(tz=None)._read_group_fill_temporal(
+                           [dict(zip([group, *measures], row)) for row in grouped], [group],
+                           {measure: measure for measure in measures},
+                           fill_from=fields.Datetime.to_datetime(start) if start and field.type == "datetime" else start)]
         # Show selection labels (e.g. "Sales Order"), not stored keys (e.g. "sale").
         options = dict(field._description_selection(self.env)) if field.type == "selection" else {}
         rows = []
-        for label, value in grouped:
+        for label, *values in grouped:
             if label in options:
                 label = options[label]
             elif isinstance(label, models.BaseModel):
@@ -84,10 +87,10 @@ class AILocalMCP(models.AbstractModel):
                                     date_format=READ_GROUP_DISPLAY_FORMAT[group.split(":")[1]])
             elif label is False:
                 label = _("Unassigned")
-            rows.append({"label": str(label), "value": value})
+            rows.append({"label": str(label), "values": values})
         return {"structuredContent": {"rows": rows[:MAX_CHART_GROUPS], "truncated": len(rows) > MAX_CHART_GROUPS,
-                                      # Over every group, also those past the limit ("Others", the chart's total).
-                                      "total": model_rs._read_group(domain, [], [measure])[0][0]}}
+                                      # Over every group, also those past the limit ("Others", the report's total).
+                                      "totals": list(model_rs._read_group(domain, [], measures)[0])}}
 
     def _execute(self, tool_name, arguments):
         allowed = {"ai_group_records"}

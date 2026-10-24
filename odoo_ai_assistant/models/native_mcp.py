@@ -37,8 +37,7 @@ else:
     )
 
 from .tools import (
-    based_on, cell_value, clean_domain, clean_field_names, clean_order, count_on_report, data_access_menus,
-    report_filters, summary_answer,
+    based_on, cell_value, clean_domain, clean_field_names, clean_order, data_access_menus, report_filters,
 )
 from .navigation import button_label, eval_view_expression, visible_for
 from .providers import _vocabulary_pattern
@@ -68,7 +67,7 @@ _CONFIRMED = object()
 # Technical models the native attachment and activity tools need.
 _NATIVE_ALLOWED_MODELS = frozenset({"ir.attachment", "mail.activity", "mail.activity.type"})
 _BUILTINS = {
-    "list_models", "get_fields", "search_records", "aggregate_records",
+    "list_models", "get_fields", "search_records",
     "read_attachment", "list_record_attachments",
     "create_record", "create_records", "update_record", "update_records", "delete_record",
     "upload_attachment", "post_message", "list_record_messages",
@@ -1047,10 +1046,6 @@ class NativeMCP(models.AbstractModel):
         ]:
             if isinstance(values, dict) and any(CREDENTIAL_FIELD.search(name) for name in values):
                 raise AccessError(_("Credential fields cannot be changed by AI tools."))
-        if entry["name"] == "aggregate_records":
-            for expression in (arguments.get("groupby") or []) + (arguments.get("aggregates") or []):
-                if CREDENTIAL_FIELD.search(expression):
-                    raise AccessError(_("Credential fields cannot be used by AI tools."))
         return entry
 
     def _snapshot(self, entry, arguments):
@@ -1279,15 +1274,11 @@ class NativeToolRequest(models.Model):
         if "domain" in arguments:
             arguments["domain"] = clean_domain(arguments["domain"])
         if arguments.get("order"):
-            arguments["order"] = clean_order(arguments["order"], arguments.get("groupby") or [],
-                                             arguments.get("aggregates") or [])
+            arguments["order"] = clean_order(arguments["order"])
         if isinstance(arguments.get("model"), str) and arguments["model"] in conversation.env:
             arguments = clean_field_names(conversation.env[arguments["model"]], arguments)
-            if tool == "mcp_aggregate_records":
-                arguments = count_on_report(conversation.env[arguments["model"]], arguments)[1]
-            if tool in ("mcp_search_records", "mcp_aggregate_records"):
-                arguments["domain"] = report_filters(conversation.env[arguments["model"]], arguments.get("domain") or [],
-                                                     arguments.get("groupby") or [])
+            if tool == "mcp_search_records":
+                arguments["domain"] = report_filters(conversation.env[arguments["model"]], arguments.get("domain") or [])
         if isinstance(arguments.get("fields"), list) and "*" in arguments["fields"]:
             del arguments["fields"]
         entry = bridge._entry(tool, arguments)
@@ -1316,18 +1307,7 @@ class NativeToolRequest(models.Model):
             "expires_at": fields.Datetime.now() + TOOL_REQUEST_LIFETIME,
         })
         if not entry["mutation"]:
-            # A sorted summary of its first N groups also keeps the groups tied with the last (as charts and Power BI's
-            # TOPN do): one query for MCP Server's default page, trimmed back to N and those ties.
-            limit, page = arguments.get("limit"), bridge._limit_bounds()[0]
-            wide = tool == "mcp_aggregate_records" and arguments.get("order") and type(limit) is int and limit < page
-            result = bridge._execute_native(tool, dict(arguments, limit=page) if wide else arguments)
-            groups = (result.get("structuredContent") or {}).get("groups")
-            if wide and isinstance(groups, list) and len(groups) > limit:
-                key, kept = str(arguments["order"]).split(",")[0].split()[0], limit
-                while kept < len(groups) and groups[kept].get(key) == groups[limit - 1].get(key):
-                    kept += 1
-                result["structuredContent"].update(groups=groups[:kept], has_more=kept < len(groups)
-                                                   or result["structuredContent"].get("has_more"))
+            result = bridge._execute_native(tool, arguments)
             request.write({"result": _json_safe(result), "state": "done"})
         return request
 
@@ -1588,7 +1568,7 @@ class NativeToolRequest(models.Model):
                     # Aggregate keys are "field", "field:sum" or "field:month", and Odoo's "__count".
                     name, _sep, operator = key.partition(":")
                     text = definitions.get(name, {}).get("string") or (_("Count") if name == "__count" else name)
-                    return "%s (%s)" % (text, _("count") if operator == "count_distinct" else operator) if operator else text
+                    return "%s (%s)" % (text, operator) if operator else text
 
                 # Aggregates list their groups before their measures.
                 keys = list(dict.fromkeys(structured.get("groupby", []) + structured.get("aggregates", [])
@@ -1617,21 +1597,6 @@ class NativeToolRequest(models.Model):
                 if self.tool == "mcp_search_records":
                     answer = (_("Found %(count)s matching records.", count=total) if total
                               else _("No matching records found."))
-                else:
-                    groupby = structured.get("groupby") or []
-                    measure = next(iter(structured.get("aggregates") or []), "__count")
-                    title = (_("%(measure)s by %(groups)s", measure=label(measure),
-                               groups=", ".join(label(key) for key in groupby)) if groupby else label(measure))
-                    # Highest and lowest from the rows themselves: right for "most" and "least" questions alike;
-                    # sorted by the measure, part of the groups still tells its first end (top or bottom N).
-                    first = str((self.arguments or {}).get("order") or "").split(",")[0].split()
-                    smallest = (first[1:2] or ["asc"])[0].lower() == "asc" if first and first[0] == measure else None
-                    answer = summary_answer(label(measure), [(" / ".join(
-                        str(value[1] if isinstance(value, list) and len(value) == 2 else
-                            _("Unassigned") if value in (None, False) else value)
-                        for value in (cells.get(key) for key in groupby)), cells[measure], row[measure])
-                        for row, cells in zip(rows, table["rows"]) if type(row.get(measure)) in (int, float)],
-                        not structured.get("has_more"), smallest)
         elif self.tool == "mcp_list_record_messages" and self.result:
             # One row per entry, in the scrolling record table instead of one long block of text.
             structured = self.result.get("structuredContent") or {}

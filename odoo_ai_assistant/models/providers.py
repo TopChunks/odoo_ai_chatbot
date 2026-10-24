@@ -902,7 +902,7 @@ class ProviderClient:
             "answer from the menus; for actual record names or values use the record tools instead. "
             "If no tool supports a data request, explain that an administrator must allow the AI to "
             "use that Odoo data in AI Settings. "
-            "For any chart, graph, plot, pie or doughnut request call odoo_chart; never fabricate data or "
+            "For totals, counts, rankings, trends, comparisons and charts call odoo_report; never fabricate data or "
             "chart markup. For record lists request only the needed fields, in alphabetical name order "
             "when appropriate. "
             + ("" if native_tools else
@@ -918,8 +918,7 @@ class ProviderClient:
             system += (
                 "\nFull native MCP tools are available with names beginning mcp_. Use them for enabled "
                 "models, schema discovery, search/read/aggregation, real creation, updates, deletion, "
-                "business methods, custom tools, chatter and attachments. mcp_aggregate_records returns "
-                "text only and cannot draw charts; use odoo_chart for every chart. "
+                "business methods, custom tools, chatter and attachments. "
                 "Every native function exposes its real input schema; supply only the actual arguments "
                 "matching that schema, never schema metadata such as type, properties, required or "
                 "additionalProperties. "
@@ -950,11 +949,8 @@ class ProviderClient:
                 "asking to share schema metadata. Use calendar.today and calendar.timezone for relative dates "
                 "such as this month; compute an inclusive start and exclusive next-period start. "
                 "For date-filtered requests inspect the actual model fields and choose the date matching "
-                "the requested business event, not automatically the creation date. For totals, counts, rankings "
-                "and trends prefer the models listed as report (Odoo's own analysis, with its usual filters); pick "
-                "the measure whose label matches the asked event, and count documents such as orders by their "
-                "reference field with count_distinct, not by rows. Elsewhere leave out drafts and cancelled records "
-                "unless asked. Never claim a partial "
+                "the requested business event, not automatically the creation date. For figures prefer the models "
+                "listed as report, and pick the measure whose label matches the asked event. Never claim a partial "
                 "page is all records."
             )
         # Rules for data-changing tools; left out only when the caller knows none are offered (a read request).

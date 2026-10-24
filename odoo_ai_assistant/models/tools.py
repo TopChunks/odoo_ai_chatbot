@@ -13,7 +13,8 @@ from odoo.tools.safe_eval import safe_eval
 from odoo.exceptions import AccessError, UserError, ValidationError
 
 from .limits import (
-    CREDENTIAL_FIELD, CURRENT_USER, MAX_CHART_TITLE_CHARS, MAX_FIELD_SUGGESTIONS, MAX_TIED_NAMES, is_restricted_model,
+    CREDENTIAL_FIELD, CURRENT_USER, MAX_CHART_TITLE_CHARS, MAX_FIELD_SUGGESTIONS, MAX_REPORT_MEASURES, MAX_TIED_NAMES,
+    is_restricted_model,
 )
 from .navigation import accessible_apps, app_structure, screen_details
 
@@ -51,9 +52,8 @@ TOOLS = [
 ]
 _TOOL = {tool["name"]: tool for tool in TOOLS}
 
-CHART_TOOL = "odoo_chart"
+CHART_TOOL = "odoo_report"
 _CHART_TYPES = ("bar", "line", "pie", "doughnut", "scatter", "table")
-_CHART_OPERATIONS = ("count", "sum", "avg")
 _DATE_INTERVALS = ("day", "week", "month", "quarter", "year")
 _GROUPABLE_TYPES = {"char", "selection", "boolean", "many2one", "many2many", "date", "datetime",
                     "integer", "float", "monetary"}
@@ -102,20 +102,21 @@ def available_tools(env):
             "name": CHART_TOOL,
             # Domains are free-form Odoo filters, which OpenAI's strict mode cannot describe.
             "strict": False,
-            "description": "Draw a chart or grouped table of Odoo records. Odoo groups the records "
-                           "by one field and counts them, or sums or averages a numeric field, with the "
-                           "user's permissions; the result stays in Odoo. Use real field names (from the "
-                           "field list or mcp_get_fields); dates group by the chosen interval. "
-                           "Set model to the technical model of the records the user asked about, and never "
-                           "substitute a different model: Odoo explains when it is not available. Charts use the "
-                           "models native_schema lists with read.",
+            "description": "Business figures from Odoo as a chart or table: totals, counts, rankings, trends "
+                           "and comparisons. Odoo groups the records by one field and computes the measures with "
+                           "the user's permissions, as its own reports and dashboards do; the result stays in Odoo. "
+                           "Use real field names (from the field list or mcp_get_fields); dates group by the "
+                           "chosen interval. Set model to the records the user asked about; it must be one "
+                           "native_schema lists with read.",
             "inputSchema": {"type": "object", "properties": {
                 "model": {"type": "string", "description": "Technical model of the records to chart"},
                 "group_by": {"type": "string", "description": "Field to group by"},
                 "interval": {"type": "string", "enum": list(_DATE_INTERVALS),
                              "description": "Grouping for date fields; default month"},
-                "operation": {"type": "string", "enum": list(_CHART_OPERATIONS)},
-                "measure": {"type": "string", "description": "Numeric field for sum or avg; empty for count"},
+                "measures": {"type": "array", "items": {"type": "string"}, "minItems": 1,
+                             "maxItems": MAX_REPORT_MEASURES,
+                             "description": "count (how many records or documents), a numeric field to sum, "
+                                            "or field:avg; several give a table"},
                 "domain": {"type": "array",
                            "description": "Odoo domain filter such as [[\"state\", \"=\", \"sale\"]]; [] for all"},
                 "chart_type": {"type": "string", "enum": list(_CHART_TYPES)},
@@ -123,7 +124,7 @@ def available_tools(env):
                           "description": "Only the N largest groups (top N); the rest add up as Others"},
                 "smallest": {"type": "boolean", "description": "Smallest groups first (bottom N, least)"},
                 "title": {"type": "string", "description": "Short title without record values"},
-            }, "required": ["model", "group_by", "operation", "chart_type", "title"], "additionalProperties": False},
+            }, "required": ["model", "group_by", "measures", "chart_type", "title"], "additionalProperties": False},
         })
     tools.extend(env["odoo.ai.assistant.native.mcp"]._provider_tools())
     return tools
@@ -139,26 +140,16 @@ def parse_tool_arguments(arguments):
     return arguments
 
 
-def clean_order(order, groupby=(), aggregates=()):
+def clean_order(order):
     """A sort as models often write it, made valid: a list, also sent as text ('["name desc"]'), is joined into one
-    sort, and a summary's sort by a totalled field ("amount_total desc") becomes that field's total
-    ("amount_total:sum desc"). Anything else is returned as it is, for MCP Server to refuse when invalid."""
+    sort. Anything else is returned as it is, for MCP Server to refuse when invalid."""
     for parse in (json.loads, ast.literal_eval):
         if isinstance(order, str) and order.strip().startswith("["):
             with contextlib.suppress(ValueError, SyntaxError):
                 order = parse(order.strip())
     if isinstance(order, (list, tuple)) and all(isinstance(term, str) for term in order):
         order = ", ".join(order)
-    if not isinstance(order, str):
-        return order
-    totals = {spec.partition(":")[0]: spec for spec in aggregates if isinstance(spec, str) and ":" in spec}
-    terms = []
-    for term in order.split(","):
-        name, _sep, direction = term.strip().partition(" ")
-        if name not in groupby:
-            name = totals.get(name, name)
-        terms.append(" ".join(filter(None, (name, direction.strip()))))
-    return ", ".join(terms)
+    return order
 
 
 def clean_field_names(model, arguments):
@@ -235,43 +226,41 @@ def execute_tool(env, name, arguments):
 
 
 def execute_chart(env, arguments):
-    """Group any chartable model by one field with Odoo's read_group and return a local chart."""
+    """Business figures for the AI's report tool: records grouped by one field with one or more measures, computed
+    as Odoo's own reports compute them (on_report), as a chart (one measure) or a table."""
     arguments = parse_tool_arguments(arguments)
     if not isinstance(arguments, dict):
-        raise ValidationError(_("Chart arguments must be an object."))
+        raise ValidationError(_("Report arguments must be an object."))
     # Only the documented arguments are used; omitted optional ones take their documented defaults.
-    arguments = {"interval": "month", "measure": "", "domain": [], **{
+    arguments = {"interval": "month", "domain": [], "measures": ["count"], **{
         key: value for key, value in arguments.items()
-        if key in {"model", "group_by", "interval", "operation", "measure", "domain", "chart_type", "limit", "title",
-                   "smallest"}
+        if key in {"model", "group_by", "interval", "measures", "domain", "chart_type", "limit", "title", "smallest"}
     }}
     name, group, interval = arguments.get("model"), arguments.get("group_by"), arguments["interval"]
-    operation, measure = arguments.get("operation"), arguments["measure"]
-    domain = clean_domain(arguments["domain"])
+    measures, domain = arguments["measures"], clean_domain(arguments["domain"])
     chart, title, limit = arguments.get("chart_type"), arguments.get("title"), arguments.get("limit")
     smallest = arguments.get("smallest") is True
     if name not in chart_models(env):
-        raise AccessError(_("'%(model)s' is not available for charts. An administrator can enable reading it "
+        raise AccessError(_("'%(model)s' is not available for reports. An administrator can enable reading it "
                             "in %(menus)s.") % {"model": name, "menus": data_access_menus(env)})
-    if (not all(isinstance(value, str) for value in (group, interval, operation, measure, chart, title))
-            or not isinstance(domain, list) or operation not in _CHART_OPERATIONS or chart not in _CHART_TYPES
+    if (not all(isinstance(value, str) for value in (group, interval, chart, title))
+            or not isinstance(measures, list) or not 1 <= len(measures) <= MAX_REPORT_MEASURES
+            or not all(isinstance(measure, str) and measure for measure in measures)
+            or not isinstance(domain, list) or chart not in _CHART_TYPES
             or interval not in _DATE_INTERVALS or not 1 <= len(title) <= MAX_CHART_TITLE_CHARS
             or not (limit is None or (type(limit) is int and limit > 0))):
-        raise ValidationError(_("Choose a model, a grouping field, count, sum or avg, a supported chart type "
-                                "and a short title."))
-    if any(isinstance(term, (list, tuple)) and term and isinstance(term[0], str) and CREDENTIAL_FIELD.search(term[0])
-           for term in domain):
-        raise AccessError(_("Credential fields cannot be used in chart filters."))
+        raise ValidationError(_("Choose a model, a grouping field, one to %(count)s measures (count or numeric "
+                                "fields), a chart type and a short title.") % {"count": MAX_REPORT_MEASURES})
+    if any(CREDENTIAL_FIELD.search(field) for field in measures + [
+            term[0] for term in domain if isinstance(term, (list, tuple)) and term and isinstance(term[0], str)]):
+        raise AccessError(_("Credential fields cannot be used in reports."))
     # As for the native tools, Odoo puts in the signed-in user where the AI wrote the placeholder ("my pipeline").
     domain = [[term[0], term[1], env.uid] if isinstance(term, list) and len(term) == 3 and term[2] == CURRENT_USER
               else term for term in domain]
-    model = env[name]
-    named = clean_field_names(model, {"domain": domain, "groupby": [group], "aggregates": [measure]})
-    domain, group, measure = named["domain"], named["groupby"][0], named["aggregates"][0]
-    if operation == "count":  # documents are counted where Odoo's dashboards count them
-        model, named = count_on_report(model, {"domain": domain, "groupby": [group], "aggregates": ["__count"]})
-        name, domain, group = model._name, named["domain"], named["groupby"][0]
-    domain = report_filters(model, domain, [group])
+    # "count", a numeric field (summed) or "field:avg" as Odoo aggregates them, computed as Odoo's reports do.
+    model, named = on_report(env[name], clean_field_names(env[name], {"domain": domain, "groupby": [group], "aggregates": [
+        "__count" if measure == "count" else measure if ":" in measure else f"{measure}:sum" for measure in measures]}))
+    name, domain, group, specs = model._name, named["domain"], named["groupby"][0], named["aggregates"]
     definitions = model.fields_get(attributes=["string", "type", "groupable", "aggregator"])
 
     def groupable(field):
@@ -281,33 +270,36 @@ def execute_chart(env, arguments):
 
     if not groupable(group):
         options = sorted(field for field in definitions if groupable(field))
-        raise ValidationError(_("'%(field)s' cannot group a chart of %(model)s. Groupable fields: %(fields)s.") % {
+        raise ValidationError(_("'%(field)s' cannot group a report of %(model)s. Groupable fields: %(fields)s.") % {
             "field": group, "model": name, "fields": ", ".join(options[:MAX_FIELD_SUGGESTIONS])})
     group_type = definitions[group]["type"]
     if chart == "scatter" and group_type not in _NUMERIC_TYPES:
         raise ValidationError(_("Scatter charts require a numeric grouping field."))
-    value_label, note = _("Record count"), ""
-    if operation == "count":
-        if measure:
-            raise ValidationError(_("Leave measure empty for a count chart."))
-        aggregate = named["aggregates"][0]
-    else:
-        definition = definitions.get(measure) or {}
-        if definition.get("type") not in _NUMERIC_TYPES or not definition.get("aggregator") \
-                or CREDENTIAL_FIELD.search(measure):
+    labels, note = [], ""
+    for spec in specs:
+        field, _sep, operation = spec.partition(":")
+        definition = definitions.get(field) or {}
+        if field == "__count" or operation == "count_distinct" and definition:
+            labels.append(_("Count") if field == "__count" else _("%s (count)") % definition["string"])
+            continue
+        if operation not in ("sum", "avg") or definition.get("type") not in _NUMERIC_TYPES \
+                or not definition.get("aggregator"):
             options = sorted(field for field, item in definitions.items()
                              if item.get("type") in _NUMERIC_TYPES and item.get("aggregator"))
             raise ValidationError(_("'%(field)s' is not a numeric field of %(model)s that can be summed. "
                                     "Numeric fields: %(fields)s.") % {
-                                        "field": measure, "model": name, "fields": ", ".join(options[:MAX_FIELD_SUGGESTIONS])})
-        aggregate = f"{measure}:{operation}"
-        value_label = definition["string"] if operation == "sum" else _("Average %s") % definition["string"]
+                                        "field": field, "model": name, "fields": ", ".join(options[:MAX_FIELD_SUGGESTIONS])})
+        labels.append(definition["string"] if operation == "sum" else _("Average %s") % definition["string"])
+        if definition["type"] == "monetary" and not model._auto:
+            # Odoo's reports convert amounts to the company's currency (their own currency column is fixed).
+            labels[-1] += f" ({env.company.currency_id.name})"
+            continue
         # Odoo leaves currency_field empty when it defaults to currency_id; resolve it the ORM's way.
-        currency = model._fields[measure].get_currency_field(model) if definition["type"] == "monetary" else None
+        currency = model._fields[field].get_currency_field(model) if definition["type"] == "monetary" else None
         if currency:
             counts = dict(model._read_group(domain, groupby=[currency], aggregates=["__count"]))
             if len(counts) > 1:
-                # Amounts in different currencies cannot be added up: chart the currency most of the records use
+                # Amounts in different currencies cannot be added up: keep the currency most of the records use
                 # (the company's on a tie), as Odoo's own reports show one currency, and say what is left out.
                 kept = max((key for key in counts if key),
                            key=lambda key: (counts[key], key == env.company.currency_id))
@@ -317,97 +309,120 @@ def execute_chart(env, arguments):
                     "others": ", ".join(key.name for key in counts if key and key != kept) or _("no currency")}
                 counts = {kept: counts[kept]}
             if counts and next(iter(counts)):
-                value_label += f" ({next(iter(counts)).name})"
+                labels[-1] += f" ({next(iter(counts)).name})"
     grouping = f"{group}:{interval}" if group_type in {"date", "datetime"} else group
     result = env["odoo.ai.assistant.mcp"]._execute("ai_group_records", {
-        "model": name, "domain": domain, "group": grouping, "measure": aggregate, "smallest": smallest,
+        "model": name, "domain": domain, "group": grouping, "measures": specs, "smallest": smallest,
     })
     # A group with nothing to add up comes back from Odoo as False (or None); it counts as zero.
-    values = [0 if row["value"] is None or row["value"] is False else row["value"] for row in result["rows"]]
-    if any(type(value) not in {int, float} or not math.isfinite(value) for value in values):
-        raise UserError(_("The chart contains invalid numeric values."))
-    if chart in {"pie", "doughnut"} and any(value < 0 for value in values):
+    rows = [(row["label"], [0 if value is None or value is False else value for value in row["values"]])
+            for row in result["rows"]]
+    if any(type(value) not in {int, float} or not math.isfinite(value) for _label, values in rows for value in values):
+        raise UserError(_("The report contains invalid numeric values."))
+    if chart in {"pie", "doughnut"} and any(values[0] < 0 for _label, values in rows):
         raise ValidationError(_("Pie and doughnut charts cannot display negative values."))
-    labels = [row["label"] for row in result["rows"]]
+    fields_used = [spec.split(":")[0] for spec in specs]
+
+    def shown(values):
+        return [cell_value(model, field, value) for field, value in zip(fields_used, values)]
+
     # From every group, before a limit keeps some: groups that share the asked-for value are all named.
-    answer = summary_answer(value_label, [(label, cell_value(model, measure, value), value)
-                                          for label, value in zip(labels, values)],
+    answer = summary_answer(labels[0], [(label, shown(values)[0], values[0]) for label, values in rows],
                             not result["truncated"], smallest if limit else None)
+    totals = [0 if value is None or value is False else value for value in result["totals"]]
+    # Averages and counts of distinct documents do not add up across groups.
+    additive = all(spec == "__count" or spec.endswith(":sum") for spec in specs)
     if limit:
-        pairs = sorted(zip(labels, values), key=lambda pair: pair[1], reverse=not smallest)
-        while limit < len(pairs) and pairs[limit][1] == pairs[limit - 1][1]:  # ties at the cut stay, as Power BI's TOPN
+        rows.sort(key=lambda row: row[1][0], reverse=not smallest)
+        while limit < len(rows) and rows[limit][1][0] == rows[limit - 1][1][0]:  # ties at the cut stay, as Power BI's TOPN
             limit += 1
-        # The rest add up as one "Others" group; an average of averages would mislead, so averages keep the top N only.
-        pairs = pairs[:limit] + ([(_("Others"), (result["total"] or 0) - sum(value for _label, value in pairs[:limit]))]
-                                 if pairs[limit:] and operation != "avg" else [])
-        labels, values = [pair[0] for pair in pairs], [pair[1] for pair in pairs]
-    shown = [cell_value(model, measure, value) for value in values]
-    basis = based_on(model, domain, what=_("%(value)s by %(group)s", value=value_label,
+        # The rest add up as one "Others" group where the measures add up.
+        rows = rows[:limit] + ([(_("Others"), [total - sum(values[index] for _label, values in rows[:limit])
+                                               for index, total in enumerate(totals)])] if rows[limit:] and additive else [])
+    basis = based_on(model, domain, what=_("%(value)s by %(group)s", value=", ".join(labels),
                                              group=definitions[group]["string"]) + (
         ", " + (_("smallest first") if smallest else _("largest first")) if limit else ""))
-    if chart == "table":
-        return {"kind": "table", "title": title, "columns": [
-            {"key": "label", "label": definitions[group]["string"]},
-            {"key": "value", "label": value_label},
-        ], "rows": [{"label": label, "value": value} for label, value in zip(labels, shown)],
+    if chart == "table" or len(specs) > 1:
+        return {"kind": "table", "title": title, "columns": [{"key": "label", "label": definitions[group]["string"]}] + [
+            {"key": f"m{index}", "label": label} for index, label in enumerate(labels)],
+            "rows": [{"label": label, **{f"m{index}": value for index, value in enumerate(shown(values))}}
+                     for label, values in rows],
             "truncated": result["truncated"], "note": note, "answer": answer, "basis": basis}
-    total = None if operation == "avg" else result["total"] or 0
-    return {"kind": "chart", "title": title, "chart_type": chart, "operation": operation, "labels": labels,
-            "values": values, "shown": shown, "value_label": value_label, "truncated": result["truncated"],
-            "note": note, "answer": answer, "basis": basis,
+    values = [values[0] for _label, values in rows]
+    total = None if specs[0].endswith(":avg") else totals[0]
+    return {"kind": "chart", "title": title, "chart_type": chart, "labels": [label for label, _values in rows],
+            "operation": "avg" if specs[0].endswith(":avg") else "sum" if specs[0].endswith(":sum") else "count",
+            "values": values, "shown": [shown([value])[0] for value in values], "value_label": labels[0],
+            "truncated": result["truncated"], "note": note, "answer": answer, "basis": basis,
             # Bottom N: "Others" is far larger than them, so it stays in the table and total but is not drawn.
-            "bars": limit if smallest and limit and len(labels) > limit else None,
+            "bars": limit if smallest and limit and len(values) > limit else None,
             # Shown under the chart: the AI never sees these values, so it cannot state the total itself.
-            "total": total, "total_shown": None if total is None else cell_value(model, measure, total)}
+            "total": total, "total_shown": None if total is None else shown([total])[0]}
 
 
-def count_on_report(model, arguments):
-    """A count of ``model``'s documents, records with a status such as orders and invoices (``arguments`` of a
-    summary: domain, groupby, aggregates, order), moved to the enabled Odoo report that counts them as Odoo's
-    dashboards do: one linked to ``model`` (Sales Analysis by its order reference) with every field the count uses,
-    the same or, for a date, the field with the same label. Documents are then counted once each, without empty
-    ones. Returns the model and arguments to use, unchanged otherwise."""
-    if not model._auto or "state" not in model._fields or any(
-            spec != "__count" for spec in arguments.get("aggregates") or ["__count"]):
-        return model, arguments
+def document_link(report, document=None):
+    """The field linking an Odoo report's rows to the documents they come from (Sales Analysis: its order
+    reference), to ``document`` when given; documents are records with a stored status. None without one."""
+    env = report.env
+    for field in sorted(report._fields.values(), key=lambda field: field.type != "reference"):
+        targets = ([name for name, _label in field._description_selection(env)] if field.type == "reference"
+                   else [field.comodel_name] if field.type == "many2one" else [])
+        if any(target in env and (target == document if document else "state" in env[target]._fields
+                                  and env[target]._fields["state"].store) for target in targets):
+            return field.name
+    return None
+
+
+def on_report(model, arguments):
+    """``arguments`` of a report (domain, groupby, aggregates) computed as Odoo's own reports compute them, as its
+    dashboards do. Documents (records with a status: orders, RFQs, invoices) move to the enabled report linked to
+    them when it has every field used, the same or the one with the same label (order date: date), and are counted
+    there once each, so empty ones are left out; otherwise they keep that report's usual filters. On a report,
+    "count" counts its documents. Returns the model and arguments to use."""
     env = model.env
-    used = {str(spec).split(":")[0] for spec in arguments.get("groupby") or []} | {
-        term[0].split(".")[0] for term in arguments.get("domain") or [] if isinstance(term, (list, tuple)) and term
-        and isinstance(term[0], str)}
-    for report in (env[name] for name in chart_models(env) if not env[name]._auto):
-        link = next((field.name for field in report._fields.values() if field.comodel_name == model._name or (
-            field.type == "reference" and model._name in dict(field._description_selection(env)))), None)
-        moved = clean_field_names(report, json.loads(json.dumps(dict(arguments, model=report._name))))
-        same = {name: report._fields.get(name) for name in used}
-        if link and all(name in model._fields and (field and field.type == model._fields[name].type
-                                                   or model._fields[name].type in ("date", "datetime"))
-                        for name, field in same.items()) and all(
-                isinstance(term, str) or str(term[0]).split(".")[0] in report._fields for term in moved.get("domain") or []) \
-                and all(str(spec).split(":")[0] in report._fields for spec in moved.get("groupby") or []):
-            moved["aggregates"] = [f"{link}:count_distinct"]
-            if moved.get("order"):
-                moved["order"] = re.sub(r"__count\b", f"{link}:count_distinct", moved["order"])
-            return report, moved
-    return model, arguments
+    if not model._auto:
+        link = document_link(model)
+        return model, dict(arguments, domain=report_filters(model, arguments["domain"], arguments["groupby"]),
+                           aggregates=[f"{link}:count_distinct" if link and spec == "__count" else spec
+                                       for spec in arguments["aggregates"]])
+    if "state" not in model._fields:
+        return model, arguments
+    used = {spec.split(":")[0] for spec in arguments["groupby"] + arguments["aggregates"] if spec != "__count"} | {
+        str(term[0]).split(".")[0] for term in arguments["domain"] if isinstance(term, (list, tuple)) and term}
+    linked = [(env[name], link) for name in chart_models(env)
+              if not env[name]._auto and (link := document_link(env[name], model._name))]
+    for report, link in linked:
+        moved = clean_field_names(report, json.loads(json.dumps(arguments)))
+        mapped = clean_field_names(report, {"fields": sorted(used)})["fields"]
+        if all(name in model._fields and target in report._fields and (
+                (report._fields[target].type, report._fields[target].comodel_name)
+                == (model._fields[name].type, model._fields[name].comodel_name)
+                or {report._fields[target].type, model._fields[name].type} <= {"date", "datetime"})
+               for name, target in zip(sorted(used), mapped)):
+            return report, dict(moved, domain=report_filters(report, moved["domain"], moved["groupby"]), aggregates=[
+                f"{link}:count_distinct" if spec == "__count" else spec for spec in moved["aggregates"]])
+    return model, dict(arguments, domain=report_filters(model, arguments["domain"], arguments["groupby"],
+                                                        linked[0][0])) if linked else arguments
 
 
-def report_filters(model, domain, groupby=()):
+def report_filters(model, domain, groupby=(), source=None):
     """``domain`` with the filters an Odoo report opens with from its own menu (Sales Analysis: confirmed sales,
     not quotations or cancelled ones), where neither ``domain`` nor ``groupby`` ("by status") uses their fields,
     so figures match Odoo's dashboards. Read from the menu's action and search view, never written here; date
     filters are left out, as the question sets the period, and so are filters of other kinds than plain
-    conditions."""
-    if model._auto or not isinstance(domain, list):
+    conditions. They come from ``source``, the report ``model``'s documents are analysed in, when given."""
+    report = model if source is None else source  # an empty recordset is false: test for None
+    if report._auto or not isinstance(domain, list):
         return domain
     env = model.env
-    actions = env["ir.actions.act_window"].sudo().search([("res_model", "=", model._name)], order="id")
+    actions = env["ir.actions.act_window"].sudo().search([("res_model", "=", report._name)], order="id")
     action = next((action for action in actions if env["ir.ui.menu"].sudo().search_count(
         [("action", "=", f"ir.actions.act_window,{action.id}")], limit=1)), None)
     if not action:
         return domain
     with contextlib.suppress(ValueError, NameError, SyntaxError, TypeError):
         context = safe_eval(action.context or "{}", {"active_id": False, "active_ids": [], "uid": env.uid})
-        search = etree.fromstring(model.get_view(action.search_view_id.id or None, "search")["arch"])
+        search = etree.fromstring(report.get_view(action.search_view_id.id or None, "search")["arch"])
         used = {term[0].split(".")[0] for term in domain if isinstance(term, (list, tuple)) and term
                 and isinstance(term[0], str)} | {str(spec).split(":")[0] for spec in groupby}
         for key, value in context.items():

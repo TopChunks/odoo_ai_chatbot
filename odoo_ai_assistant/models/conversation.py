@@ -824,7 +824,7 @@ class AIConversation(models.Model):
                     # The query goes with the chart, so a follow-up ("the same as bars") can reuse it (_provider_history).
                     payload = dict(execute_chart(self.env, arguments), query={"tool": CHART_TOOL, "arguments": arguments})
                     if not payload.get("labels", payload.get("rows")):
-                        raise DirectReply(_("No records match this chart's filters, so there is nothing to draw."))
+                        raise DirectReply(_("No matching records found."))
                     self._store_answer("\n".join(filter(None, [payload["answer"] or payload["title"], payload["note"]])),
                                        local_only=True, payload=payload, execution_steps=list(steps))
                 else:
