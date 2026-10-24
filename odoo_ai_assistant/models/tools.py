@@ -132,6 +132,20 @@ def parse_tool_arguments(arguments):
     return arguments
 
 
+def clean_order(order, groupby, aggregates):
+    """A summary's sort as models often write it, by a totalled field ("amount_total desc"), in the form MCP Server
+    accepts: that field's total ("amount_total:sum desc"). Other terms are returned as they are, for MCP Server to
+    refuse when invalid."""
+    totals = {spec.partition(":")[0]: spec for spec in aggregates if isinstance(spec, str) and ":" in spec}
+    terms = []
+    for term in order.split(","):
+        name, _sep, direction = term.strip().partition(" ")
+        if name not in groupby:
+            name = totals.get(name, name)
+        terms.append(" ".join(filter(None, (name, direction.strip()))))
+    return ", ".join(terms)
+
+
 def clean_domain(domain):
     """A domain's terms as models often write them, made valid: a term sent as text, and the values of an
     "in" / "not in" term spread over the term or given as one value instead of a list. Spread values with a
@@ -309,10 +323,9 @@ def cell_value(model, name, value, row=None):
     elif field and field.type in ("float", "monetary") and type(value) in (int, float):
         linked = (row or {}).get(field.get_currency_field(model)) if field.type == "monetary" else None
         currency = env["res.currency"].browse(linked[0]).exists() if isinstance(linked, (list, tuple)) and linked else None
-        # Money: the currency's decimals (2 without a currency); a decimal field: its own, or as stored if it has none.
-        digits = field.get_digits(env) if field.type == "float" else (16, 2)
-        if digits:
-            value = formatLang(env, value, digits=digits[1], currency_obj=currency or None)
+        # Money: the currency's decimals (2 without a currency); a decimal field: its own, or 2 as Odoo's screens show.
+        digits = (field.get_digits(env) if field.type == "float" else None) or (16, 2)
+        value = formatLang(env, value, digits=digits[1], currency_obj=currency or None)
     return table_value(value)
 
 
