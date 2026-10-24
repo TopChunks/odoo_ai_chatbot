@@ -53,6 +53,8 @@ MAX_DISCOVERY_ROUNDS = 3
 # Charts drawn in the chat, and the chart picture a browser may send for a PDF export (base64 characters).
 MAX_CHART_GROUPS = 50
 MAX_CHART_TITLE_CHARS = 120
+# Groups named in a chart or summary answer when several share the highest or lowest value.
+MAX_TIED_NAMES = 3
 MAX_CHART_IMAGE_CHARS = 4_000_000
 
 # App and screen discovery: names the AI may look up, screens and fields it receives.

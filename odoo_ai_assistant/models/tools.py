@@ -9,7 +9,9 @@ from odoo import _, fields, release
 from odoo.tools.misc import formatLang, get_lang
 from odoo.exceptions import AccessError, UserError, ValidationError
 
-from .limits import CREDENTIAL_FIELD, CURRENT_USER, MAX_CHART_TITLE_CHARS, MAX_FIELD_SUGGESTIONS, is_restricted_model
+from .limits import (
+    CREDENTIAL_FIELD, CURRENT_USER, MAX_CHART_TITLE_CHARS, MAX_FIELD_SUGGESTIONS, MAX_TIED_NAMES, is_restricted_model,
+)
 from .navigation import accessible_apps, app_structure, screen_details
 
 TOOLS = [
@@ -320,6 +322,10 @@ def execute_chart(env, arguments):
     if chart in {"pie", "doughnut"} and any(value < 0 for value in values):
         raise ValidationError(_("Pie and doughnut charts cannot display negative values."))
     labels = [row["label"] for row in result["rows"]]
+    # From every group, before a limit keeps some: groups that share the asked-for value are all named.
+    answer = summary_answer(value_label, [(label, cell_value(model, measure, value), value)
+                                          for label, value in zip(labels, values)],
+                            not result["truncated"], smallest if limit else None)
     if limit:
         pairs = sorted(zip(labels, values), key=lambda pair: pair[1], reverse=not smallest)
         # The rest add up as one "Others" group; an average of averages would mislead, so averages keep the top N only.
@@ -327,9 +333,6 @@ def execute_chart(env, arguments):
                                  if pairs[limit:] and operation != "avg" else [])
         labels, values = [pair[0] for pair in pairs], [pair[1] for pair in pairs]
     shown = [cell_value(model, measure, value) for value in values]
-    # The groups themselves, without "Others": all of them unless a limit or Odoo's group cap left some out.
-    ranked = list(zip(labels, shown, values))[:limit or None]
-    answer = summary_answer(value_label, ranked, not result["truncated"] and len(ranked) == len(labels), smallest)
     if chart == "table":
         return {"kind": "table", "title": title, "columns": [
             {"key": "label", "label": definitions[group]["string"]},
@@ -340,26 +343,37 @@ def execute_chart(env, arguments):
     return {"kind": "chart", "title": title, "chart_type": chart, "operation": operation, "labels": labels,
             "values": values, "shown": shown, "value_label": value_label, "truncated": result["truncated"],
             "note": note, "answer": answer,
+            # Bottom N: "Others" is far larger than them, so it stays in the table and total but is not drawn.
+            "bars": limit if smallest and limit and len(labels) > limit else None,
             # Shown under the chart: the AI never sees these values, so it cannot state the total itself.
             "total": total, "total_shown": None if total is None else cell_value(model, measure, total)}
 
 
 def summary_answer(measure, rows, complete=True, smallest=None):
-    """A plain first answer from summary rows (name, value shown, value): the one value, or the highest and lowest
-    of every group; of only part of them, its first (``smallest`` says which end), or None when that is unknown."""
+    """A plain first answer from summary rows (name, value shown, value), all of the groups when ``complete``: the
+    one value, the highest and lowest, or only the end ``smallest`` asks for (True: lowest). Groups sharing that
+    value are all named. None when part of the groups cannot tell."""
     if not rows:
         return _("No matching records found.")
     if len(rows) == 1:
         return (_("%(names)s — %(measure)s: %(value)s.", names=rows[0][0], measure=measure, value=rows[0][1])
                 if rows[0][0] else _("%(measure)s: %(value)s.", measure=measure, value=rows[0][1]))
-    high, low = max(rows, key=lambda row: row[2]), min(rows, key=lambda row: row[2])
-    if complete:
-        return _("Highest %(measure)s: %(high)s (%(high_value)s). Lowest: %(low)s (%(low_value)s).",
-                 measure=measure, high=high[0], high_value=high[1], low=low[0], low_value=low[1])
-    if smallest is None:
+    if smallest is None and not complete:
         return None
-    return (_("Lowest %(measure)s: %(name)s (%(value)s).", measure=measure, name=low[0], value=low[1]) if smallest
-            else _("Highest %(measure)s: %(name)s (%(value)s).", measure=measure, name=high[0], value=high[1]))
+
+    def end(pick):
+        tied = [row for row in rows if row[2] == pick(row[2] for row in rows)]
+        names = ", ".join(row[0] for row in tied[:MAX_TIED_NAMES]) + (
+            _(" and %s more", len(tied) - MAX_TIED_NAMES) if len(tied) > MAX_TIED_NAMES else "")
+        return names, tied[0][1] if len(tied) == 1 else _("%s each", tied[0][1])
+
+    if smallest is None:
+        (high, high_value), (low, low_value) = end(max), end(min)
+        return _("Highest %(measure)s: %(high)s (%(high_value)s). Lowest: %(low)s (%(low_value)s).",
+                 measure=measure, high=high, high_value=high_value, low=low, low_value=low_value)
+    name, value = end(min if smallest else max)
+    return (_("Lowest %(measure)s: %(name)s (%(value)s).", measure=measure, name=name, value=value) if smallest
+            else _("Highest %(measure)s: %(name)s (%(value)s).", measure=measure, name=name, value=value))
 
 
 def cell_value(model, name, value, row=None):

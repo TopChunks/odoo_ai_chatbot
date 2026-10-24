@@ -212,6 +212,9 @@ export class LocalVisualization extends Component {
         const scatter = payload.chart_type === "scatter";
         const horizontal = this.horizontalBars;
         const count = payload.operation === "count";
+        // Bottom N charts leave "Others" out of the bars (payload.bars); the table keeps it.
+        const labels = payload.labels.slice(0, payload.bars || payload.labels.length);
+        const values = payload.values.slice(0, labels.length);
         const categoryAxis = {
             type: "category",
             grid: { display: false },
@@ -226,15 +229,13 @@ export class LocalVisualization extends Component {
         return {
             type: payload.chart_type,
             data: {
-                labels: [...payload.labels],
+                labels,
                 datasets: [{
                     label: payload.value_label,
                     // No numeric X series is provided: scatter uses label positions, not invented data.
-                    data: scatter
-                        ? payload.values.map((value, index) => ({ x: index, y: value }))
-                        : [...payload.values],
+                    data: scatter ? values.map((value, index) => ({ x: index, y: value })) : values,
                     backgroundColor: circular
-                        ? payload.values.map((_, index) => getColor(index, colorScheme, payload.values.length))
+                        ? values.map((_, index) => getColor(index, colorScheme, values.length))
                         : getColor(0, colorScheme, 1),
                     borderColor: circular ? undefined : getColor(0, colorScheme, 1),
                     borderWidth: 2,
