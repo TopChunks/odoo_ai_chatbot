@@ -620,6 +620,13 @@ class AIConversation(models.Model):
             if screen:
                 context["current_screen"] = screen
             context.update(self._menus_named())
+            # The buttons a question about buttons names, as the previews under the answer show them, so the answer
+            # can say where they are and how they look (worked out only when the question speaks of a button).
+            if re.search(re.escape(self.env._("button")), self._latest_question(), re.IGNORECASE):
+                buttons = (self._named_apps() or {}).get("buttons")
+                if buttons:
+                    context["named_buttons"] = screen_details_for_ai({"screens": [{"buttons": buttons}]})[
+                        "screens"][0]["buttons"]
         # Who is asking, so "what is my name" or "which company am I in" needs no tool call.
         context["signed_in"] = {"name": self.env.user.name, "company": self.env.company.name}
         if config.local_tools:
