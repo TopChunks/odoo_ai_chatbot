@@ -950,10 +950,10 @@ class ProviderClient:
                 "asking to share schema metadata. Use calendar.today and calendar.timezone for relative dates "
                 "such as this month; compute an inclusive start and exclusive next-period start. "
                 "For date-filtered requests inspect the actual model fields and choose the date matching "
-                "the requested business event, not automatically the creation date. Likewise pick the quantity "
-                "or amount field matching that event (sold or ordered: the ordered one, not delivered, invoiced "
-                "or paid unless asked), and for sold, purchased or invoiced totals keep only confirmed or posted "
-                "documents, not drafts or cancelled ones, unless asked. Never claim a partial "
+                "the requested business event, not automatically the creation date. For totals, rankings and "
+                "trends prefer Odoo's analysis models (technical names ending in .report) when listed; pick the "
+                "measure whose label matches the asked event, leave out drafts and cancelled records unless asked, "
+                "and say which measure and filter you used. Never claim a partial "
                 "page is all records."
             )
         # Rules for data-changing tools; left out only when the caller knows none are offered (a read request).

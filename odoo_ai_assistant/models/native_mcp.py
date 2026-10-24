@@ -1604,7 +1604,10 @@ class NativeToolRequest(models.Model):
                     if not valued:
                         answer = _("No matching records found.")
                     elif len(valued) == 1 or not groupby:
-                        answer = _("%(measure)s: %(value)s.", measure=label(measure), value=valued[0][1][measure])
+                        cells = valued[0][1]
+                        answer = (_("%(names)s — %(measure)s: %(value)s.", names=named(cells),
+                                    measure=label(measure), value=cells[measure]) if groupby else
+                                  _("%(measure)s: %(value)s.", measure=label(measure), value=cells[measure]))
                     elif not structured.get("has_more"):
                         high = max(valued, key=lambda item: item[0])[1]
                         low = min(valued, key=lambda item: item[0])[1]
