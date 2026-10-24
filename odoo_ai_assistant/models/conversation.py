@@ -121,7 +121,7 @@ class AIConversation(models.Model):
             latest = latest_by_conversation.get(conversation.id, Message)
             model = conversation._model(config)
             entries.append({
-                "id": conversation.id, "name": conversation.name,
+                "id": conversation.id, "name": conversation.name, "channel_id": conversation.channel_id.id,
                 "model_id": model.id, "model": model.name or _("Not configured"),
                 "preview": latest.content[:CONVERSATION_PREVIEW_CHARS] if latest else _("This is the start of your conversation"),
                 "date": fields.Datetime.to_string(latest.create_date or conversation.create_date),

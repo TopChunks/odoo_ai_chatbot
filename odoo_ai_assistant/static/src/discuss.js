@@ -11,6 +11,8 @@ import { deserializeDateTime } from "@web/core/l10n/dates";
 import { Thread } from "@mail/core/common/thread_model";
 import { MessagingMenu } from "@mail/core/public_web/messaging_menu";
 import { DiscussCoreCommon } from "@mail/discuss/core/common/discuss_core_common_service";
+import { ChatWindow } from "@mail/core/common/chat_window_model";
+import { ChatHub } from "@mail/core/common/chat_hub";
 import { AI_WORKSPACE_ID, AssistantPanel } from "./assistant";
 
 /** AI conversations are Discuss group chats that only the AI panel can display (its cards, charts and tables). */
@@ -27,6 +29,34 @@ patch(Thread.prototype, {
     get inChathubOnNewMessage() {
         // Keep AI replies out of Odoo's chat bubbles, which would show them as plain text.
         return super.inChathubOnNewMessage && !isAIConversation(this.store.env.services.odoo_ai.state, this);
+    },
+});
+
+patch(ChatWindow.prototype, {
+    async open() {
+        // An AI conversation opens in the AI panel (its cards, charts and tables), never as a plain chat window,
+        // however its window or bubble got there (restored from an earlier visit or another tab).
+        const ai = this.store.env.services.odoo_ai;
+        if (this.thread && isAIConversation(ai.state, this.thread)) {
+            await this.close();
+            return ai.open(ai.state.conversations.find((conversation) => conversation.channel_id === this.thread.id));
+        }
+        return super.open(...arguments);
+    },
+});
+
+patch(ChatHub.prototype, {
+    setup() {
+        super.setup();
+        const aiState = useState(useService("odoo_ai").state);
+        // AI windows already in the chat bar (restored from an earlier visit or another tab) are closed.
+        useEffect(() => {
+            for (const chatWindow of [...this.chatHub.opened, ...this.chatHub.folded]) {
+                if (chatWindow.thread && isAIConversation(aiState, chatWindow.thread)) {
+                    chatWindow.close();
+                }
+            }
+        }, () => [aiState.channel_ids.length, this.chatHub.opened.length, this.chatHub.folded.length]);
     },
 });
 
