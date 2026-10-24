@@ -6,7 +6,10 @@ import re
 from datetime import date, datetime
 
 from odoo import _, fields, release
+from lxml import etree
+
 from odoo.tools.misc import formatLang, get_lang
+from odoo.tools.safe_eval import safe_eval
 from odoo.exceptions import AccessError, UserError, ValidationError
 
 from .limits import (
@@ -264,7 +267,7 @@ def execute_chart(env, arguments):
               else term for term in domain]
     model = env[name]
     named = clean_field_names(model, {"domain": domain, "groupby": [group], "aggregates": [measure]})
-    domain, group, measure = named["domain"], named["groupby"][0], named["aggregates"][0]
+    domain, group, measure = report_filters(model, named["domain"]), named["groupby"][0], named["aggregates"][0]
     definitions = model.fields_get(attributes=["string", "type", "groupable", "aggregator"])
 
     def groupable(field):
@@ -352,6 +355,36 @@ def execute_chart(env, arguments):
             "bars": limit if smallest and limit and len(labels) > limit else None,
             # Shown under the chart: the AI never sees these values, so it cannot state the total itself.
             "total": total, "total_shown": None if total is None else cell_value(model, measure, total)}
+
+
+def report_filters(model, domain):
+    """``domain`` with the filters an Odoo report opens with from its own menu (Sales Analysis: confirmed sales,
+    not quotations or cancelled ones), where ``domain`` has no condition on their fields, so figures match Odoo's
+    dashboards. Read from the menu's action and search view, never written here; date filters are left out, as the
+    question sets the period, and so are filters of other kinds than plain conditions."""
+    if model._auto or not isinstance(domain, list):
+        return domain
+    env = model.env
+    actions = env["ir.actions.act_window"].sudo().search([("res_model", "=", model._name)], order="id")
+    action = next((action for action in actions if env["ir.ui.menu"].sudo().search_count(
+        [("action", "=", f"ir.actions.act_window,{action.id}")], limit=1)), None)
+    if not action:
+        return domain
+    with contextlib.suppress(ValueError, NameError, SyntaxError, TypeError):
+        context = safe_eval(action.context or "{}", {"active_id": False, "active_ids": [], "uid": env.uid})
+        search = etree.fromstring(model.get_view(action.search_view_id.id or None, "search")["arch"])
+        used = {term[0].split(".")[0] for term in domain if isinstance(term, (list, tuple)) and term
+                and isinstance(term[0], str)}
+        for key, value in context.items():
+            node = search.find(f".//filter[@name='{key.removeprefix('search_default_')}']") \
+                if key.startswith("search_default_") and value else None
+            terms = ast.literal_eval(node.get("domain") or "None") if node is not None and not node.get("date") else None
+            if isinstance(terms, list) and terms and all(
+                    isinstance(term, (list, tuple)) and len(term) == 3 and term[0] in model._fields
+                    and model._fields[term[0]].type not in ("date", "datetime") and term[0] not in used
+                    for term in terms):
+                domain = domain + [list(term) for term in terms]
+    return domain
 
 
 def based_on(model, domain, order="", what=""):
