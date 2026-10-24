@@ -5,6 +5,7 @@
             <t t-set="payload" t-value="props.payload"/>
             <t t-if="payload.kind === 'mcp_request'">
                 <h3 class="o_ai_visualization_title" t-esc="payload.summary ? payload.summary.headline : payload.title"/>
+                <p t-if="payload.basis" class="small text-muted mb-2" t-esc="payload.basis"/>
                 <p t-if="payload.description &amp;&amp; !payload.summary" class="small text-muted mb-2" t-esc="payload.description"/>
                 <p t-if="payload.state === 'pending'" class="text-warning small">
                     Preview only. Confirming may run Odoo automation, send notifications or affect related records.
@@ -80,6 +81,7 @@
             </t>
             <t t-else="">
                 <h3 class="o_ai_visualization_title" t-esc="payload.title"/>
+                <p t-if="payload.basis" class="small text-muted mb-2" t-esc="payload.basis"/>
                 <t t-if="payload.kind === 'chart'">
                     <div t-if="!chartNotice" class="o_ai_chart" t-att-hidden="!!status.chartError" t-att-style="'height: ' + chartHeight">
                         <canvas t-ref="chart" role="img" t-att-aria-label="payload.title + ' — ' + payload.value_label + '. Data table below.'"/>

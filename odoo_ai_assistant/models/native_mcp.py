@@ -36,7 +36,9 @@ else:
         MAX_UPLOAD_BYTES as MAX_UPLOAD_BYTES, _json_safe,
     )
 
-from .tools import cell_value, clean_domain, clean_field_names, clean_order, data_access_menus, summary_answer
+from .tools import (
+    based_on, cell_value, clean_domain, clean_field_names, clean_order, data_access_menus, summary_answer,
+)
 from .navigation import button_label, eval_view_expression, visible_for
 from .providers import _vocabulary_pattern
 from .limits import (
@@ -1566,6 +1568,7 @@ class NativeToolRequest(models.Model):
                                  ensure_ascii=False, indent=2)
         table = None
         answer = None  # a plain first answer, from the result itself, for a result the AI provider does not see
+        basis = None
         if self.tool in {"mcp_search_records", "mcp_aggregate_records"} and self.result:
             structured = self.result.get("structuredContent") or {}
             rows = structured.get("records" if self.tool == "mcp_search_records" else "groups")
@@ -1600,8 +1603,11 @@ class NativeToolRequest(models.Model):
                     "total": total, "offset": offset,
                     "has_more": not requested and offset + len(rows) < total,
                 }
+                arguments = self.arguments or {}
+                basis = based_on(self.env[model].with_user(self.user_id), arguments.get("domain") or [],
+                                 arguments.get("order") or "")
+                title = table.pop("title")
                 if self.tool == "mcp_search_records":
-                    title = table.pop("title")
                     answer = (_("Found %(count)s matching records.", count=total) if total
                               else _("No matching records found."))
                 else:
@@ -1633,7 +1639,7 @@ class NativeToolRequest(models.Model):
             }
         return {
             "kind": "mcp_request", "request_id": self.id, "title": title, "state": self.state,
-            "description": description, "answer": answer,
+            "description": description, "answer": answer, "basis": basis,
             "mutation": self.mutation, "summary": summary, "details": details[:MAX_REQUEST_DETAIL_CHARS],
             "table": table,
             "images": images, "links": links, "provider": self.provider,

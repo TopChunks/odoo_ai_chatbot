@@ -335,20 +335,89 @@ def execute_chart(env, arguments):
                                  if pairs[limit:] and operation != "avg" else [])
         labels, values = [pair[0] for pair in pairs], [pair[1] for pair in pairs]
     shown = [cell_value(model, measure, value) for value in values]
+    basis = based_on(model, domain, what=_("%(value)s by %(group)s", value=value_label,
+                                             group=definitions[group]["string"]) + (
+        ", " + (_("smallest first") if smallest else _("largest first")) if limit else ""))
     if chart == "table":
         return {"kind": "table", "title": title, "columns": [
             {"key": "label", "label": definitions[group]["string"]},
             {"key": "value", "label": value_label},
         ], "rows": [{"label": label, "value": value} for label, value in zip(labels, shown)],
-            "truncated": result["truncated"], "note": note, "answer": answer}
+            "truncated": result["truncated"], "note": note, "answer": answer, "basis": basis}
     total = None if operation == "avg" else result["total"] or 0
     return {"kind": "chart", "title": title, "chart_type": chart, "operation": operation, "labels": labels,
             "values": values, "shown": shown, "value_label": value_label, "truncated": result["truncated"],
-            "note": note, "answer": answer,
+            "note": note, "answer": answer, "basis": basis,
             # Bottom N: "Others" is far larger than them, so it stays in the table and total but is not drawn.
             "bars": limit if smallest and limit and len(labels) > limit else None,
             # Shown under the chart: the AI never sees these values, so it cannot state the total itself.
             "total": total, "total_shown": None if total is None else cell_value(model, measure, total)}
+
+
+def based_on(model, domain, order="", what=""):
+    """What a result was based on, in the user's words, built from the call that ran (not the AI's account of it):
+    the records, each filter condition with field labels and readable values, the sort and ``what`` was added up.
+    A model with a status says so when no condition is on it, the most common reason a figure differs."""
+    env, domain = model.env, domain if isinstance(domain, list) else []
+
+    def field_of(path):
+        owner, labels = model, []
+        for name in path.split("."):
+            field = owner._fields.get(name)
+            if field is None:
+                return path, None, None
+            labels.append(field._description_string(env))
+            if name != path.split(".")[-1] and field.relational:
+                owner = env[field.comodel_name]
+        return " › ".join(labels), field, owner
+
+    def shown(field, owner, value):
+        if isinstance(value, (list, tuple)):
+            return ", ".join(shown(field, owner, item) for item in value) or _("none")
+        if isinstance(value, bool):
+            return _("yes") if value else _("no")
+        if field.relational and type(value) is int:
+            return env[field.comodel_name].browse(value).exists()._filtered_access("read").display_name or str(value)
+        if field.type == "datetime" and isinstance(value, str) and len(value) == 10:  # a bare day reads as that day
+            return fields.Date.to_date(value).strftime(get_lang(env).date_format)
+        return str(cell_value(owner, field.name, value))
+
+    def term(item):
+        name, field, owner = field_of(item[0]) if isinstance(item, (list, tuple)) and len(item) == 3 \
+            and isinstance(item[0], str) else (None, None, None)
+        if field is None:
+            return str(item)
+        dated = field.type in ("date", "datetime")
+        words = {"=": "%s", "in": "%s", "!=": _("not %s"), "not in": _("not %s"),
+                 ">": _("after %s") if dated else _("more than %s"), ">=": _("from %s") if dated else _("at least %s"),
+                 "<": _("before %s") if dated else _("less than %s"), "<=": _("until %s") if dated else _("at most %s"),
+                 "ilike": _("contains “%s”"), "not ilike": _("does not contain “%s”")}
+        return "%s: %s" % (name, words.get(item[1], item[1] + " %s") % shown(field, owner, item[2]))
+
+    def node(position):
+        token = domain[position]
+        if token in ("&", "|"):
+            left, position = node(position + 1)
+            right, position = node(position)
+            return "(%s %s %s)" % (left, _("and") if token == "&" else _("or"), right), position
+        if token == "!":
+            inner, position = node(position + 1)
+            return _("not (%s)", inner), position
+        return term(token), position + 1
+
+    parts, position = [model._description], 0
+    while position < len(domain):
+        part, position = node(position)
+        parts.append(part)
+    if "state" in model._fields and not any(isinstance(item, (list, tuple)) and str(item[0]).split(".")[0] == "state"
+                                            for item in domain):
+        parts.append(_("%s: any", field_of("state")[0]))
+    for item in filter(None, (piece.strip() for piece in str(order or "").split(","))):
+        name, _sep, direction = item.partition(" ")
+        label = _("Count") if name.startswith("__count") else field_of(name.split(":")[0])[0]
+        parts.append(_("sorted by %(field)s, %(direction)s", field=label, direction=_("descending")
+                       if direction.strip().lower() == "desc" else _("ascending")))
+    return _("Based on: %s", " · ".join(parts + ([what] if what else [])))
 
 
 def summary_answer(measure, rows, complete=True, smallest=None):
