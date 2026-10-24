@@ -36,7 +36,7 @@ else:
         MAX_UPLOAD_BYTES as MAX_UPLOAD_BYTES, _json_safe,
     )
 
-from .tools import cell_value, clean_domain, clean_field_names, clean_order, data_access_menus
+from .tools import cell_value, clean_domain, clean_field_names, clean_order, data_access_menus, summary_answer
 from .navigation import button_label, eval_view_expression, visible_for
 from .providers import _vocabulary_pattern
 from .limits import (
@@ -1599,27 +1599,12 @@ class NativeToolRequest(models.Model):
                     title = (_("%(measure)s by %(groups)s", measure=label(measure),
                                groups=", ".join(label(key) for key in groupby)) if groupby else label(measure))
                     # Highest and lowest from the rows themselves: right for "most" and "least" questions alike.
-                    valued = [(row[measure], cells) for row, cells in zip(rows, table["rows"])
-                              if type(row.get(measure)) in (int, float)]
-
-                    def named(cells):
-                        return " / ".join(str(value[1] if isinstance(value, list) and len(value) == 2 else
-                                              _("Unassigned") if value in (None, False) else value)
-                                          for value in (cells.get(key) for key in groupby))
-
-                    if not valued:
-                        answer = _("No matching records found.")
-                    elif len(valued) == 1 or not groupby:
-                        cells = valued[0][1]
-                        answer = (_("%(names)s — %(measure)s: %(value)s.", names=named(cells),
-                                    measure=label(measure), value=cells[measure]) if groupby else
-                                  _("%(measure)s: %(value)s.", measure=label(measure), value=cells[measure]))
-                    elif not structured.get("has_more"):
-                        high = max(valued, key=lambda item: item[0])[1]
-                        low = min(valued, key=lambda item: item[0])[1]
-                        answer = _("Highest %(measure)s: %(high)s (%(high_value)s). Lowest: %(low)s (%(low_value)s).",
-                                   measure=label(measure), high=named(high), high_value=high[measure],
-                                   low=named(low), low_value=low[measure])
+                    answer = summary_answer(label(measure), [(" / ".join(
+                        str(value[1] if isinstance(value, list) and len(value) == 2 else
+                            _("Unassigned") if value in (None, False) else value)
+                        for value in (cells.get(key) for key in groupby)), cells[measure], row[measure])
+                        for row, cells in zip(rows, table["rows"]) if type(row.get(measure)) in (int, float)],
+                        not structured.get("has_more"))
         elif self.tool == "mcp_list_record_messages" and self.result:
             # One row per entry, in the scrolling record table instead of one long block of text.
             structured = self.result.get("structuredContent") or {}

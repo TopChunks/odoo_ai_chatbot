@@ -822,8 +822,7 @@ class AIConversation(models.Model):
                     payload = dict(execute_chart(self.env, arguments), query={"tool": CHART_TOOL, "arguments": arguments})
                     if not payload.get("labels", payload.get("rows")):
                         raise DirectReply(_("No records match this chart's filters, so there is nothing to draw."))
-                    self._store_answer("\n".join(filter(None, [_("Local Odoo chart: %s") % payload["title"],
-                                                               payload["note"]])),
+                    self._store_answer("\n".join(filter(None, [payload["answer"] or payload["title"], payload["note"]])),
                                        local_only=True, payload=payload, execution_steps=list(steps))
                 else:
                     terminal_result = True

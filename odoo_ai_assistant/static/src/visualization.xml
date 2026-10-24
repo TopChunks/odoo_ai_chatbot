@@ -94,11 +94,11 @@
                             <tbody>
                                 <tr t-foreach="payload.labels" t-as="label" t-key="label_index">
                                     <th scope="row" t-esc="label"/>
-                                    <td t-esc="payload.values[label_index]"/>
+                                    <td t-esc="(payload.shown || payload.values)[label_index]"/>
                                 </tr>
                                 <tr t-if="!payload.labels.length"><td colspan="2">No data available.</td></tr>
                             </tbody>
-                            <tfoot t-if="typeof payload.total === 'number'"><tr><th scope="row">Total</th><th t-esc="payload.total"/></tr></tfoot>
+                            <tfoot t-if="typeof payload.total === 'number'"><tr><th scope="row">Total</th><th t-esc="payload.total_shown !== undefined ? payload.total_shown : payload.total"/></tr></tfoot>
                         </table>
                     </div>
                 </t>

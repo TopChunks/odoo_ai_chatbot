@@ -48,17 +48,17 @@ class AILocalMCP(models.AbstractModel):
         name="ai_group_records", description="Group records by one field locally for a chart.",
         input_schema={"type": "object", "properties": {
             "model": {"type": "string"}, "domain": {"type": "array"},
-            "group": {"type": "string"}, "measure": {"type": "string"},
+            "group": {"type": "string"}, "measure": {"type": "string"}, "smallest": {"type": "boolean"},
         }, "required": ["model", "domain", "group", "measure"], "additionalProperties": False},
         operation="read", readOnlyHint=True,
     )
     @api.model
-    def _ai_group_records(self, model, domain, group, measure):
+    def _ai_group_records(self, model, domain, group, measure, smallest=False):
         model_rs = self._check_op(model, "read")
-        # Largest groups first (periods keep their order), so the groups kept within the limit are the biggest.
+        # Largest (or smallest) groups first, periods in their order, so the groups kept within the limit are those.
         grouped = model_rs._read_group(
             domain, groupby=[group], aggregates=[measure], limit=MAX_CHART_GROUPS + 1,
-            order=None if ":" in group else f"{measure} desc",
+            order=None if ":" in group else f"{measure} {'asc' if smallest else 'desc'}",
         )
         field = model_rs._fields[group.split(":")[0]]
         if ":" in group:

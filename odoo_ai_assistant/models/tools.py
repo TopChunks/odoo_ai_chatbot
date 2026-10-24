@@ -116,6 +116,7 @@ def available_tools(env):
                 "chart_type": {"type": "string", "enum": list(_CHART_TYPES)},
                 "limit": {"type": "integer", "minimum": 1,
                           "description": "Only the N largest groups (top N); the rest add up as Others"},
+                "smallest": {"type": "boolean", "description": "Smallest groups first (bottom N, least)"},
                 "title": {"type": "string", "description": "Short title without record values"},
             }, "required": ["model", "group_by", "operation", "chart_type", "title"], "additionalProperties": False},
         })
@@ -236,12 +237,14 @@ def execute_chart(env, arguments):
     # Only the documented arguments are used; omitted optional ones take their documented defaults.
     arguments = {"interval": "month", "measure": "", "domain": [], **{
         key: value for key, value in arguments.items()
-        if key in {"model", "group_by", "interval", "operation", "measure", "domain", "chart_type", "limit", "title"}
+        if key in {"model", "group_by", "interval", "operation", "measure", "domain", "chart_type", "limit", "title",
+                   "smallest"}
     }}
     name, group, interval = arguments.get("model"), arguments.get("group_by"), arguments["interval"]
     operation, measure = arguments.get("operation"), arguments["measure"]
     domain = clean_domain(arguments["domain"])
     chart, title, limit = arguments.get("chart_type"), arguments.get("title"), arguments.get("limit")
+    smallest = arguments.get("smallest") is True
     if name not in chart_models(env):
         raise AccessError(_("'%(model)s' is not available for charts. An administrator can enable reading it "
                             "in %(menus)s.") % {"model": name, "menus": data_access_menus(env)})
@@ -308,7 +311,7 @@ def execute_chart(env, arguments):
                 value_label += f" ({next(iter(counts)).name})"
     grouping = f"{group}:{interval}" if group_type in {"date", "datetime"} else group
     result = env["odoo.ai.assistant.mcp"]._execute("ai_group_records", {
-        "model": name, "domain": domain, "group": grouping, "measure": aggregate,
+        "model": name, "domain": domain, "group": grouping, "measure": aggregate, "smallest": smallest,
     })
     # A group with nothing to add up comes back from Odoo as False (or None); it counts as zero.
     values = [0 if row["value"] is None or row["value"] is False else row["value"] for row in result["rows"]]
@@ -318,21 +321,45 @@ def execute_chart(env, arguments):
         raise ValidationError(_("Pie and doughnut charts cannot display negative values."))
     labels = [row["label"] for row in result["rows"]]
     if limit:
-        pairs = sorted(zip(labels, values), key=lambda pair: pair[1], reverse=True)
+        pairs = sorted(zip(labels, values), key=lambda pair: pair[1], reverse=not smallest)
         # The rest add up as one "Others" group; an average of averages would mislead, so averages keep the top N only.
         pairs = pairs[:limit] + ([(_("Others"), (result["total"] or 0) - sum(value for _label, value in pairs[:limit]))]
                                  if pairs[limit:] and operation != "avg" else [])
         labels, values = [pair[0] for pair in pairs], [pair[1] for pair in pairs]
+    shown = [cell_value(model, measure, value) for value in values]
+    # The groups themselves, without "Others": all of them unless a limit or Odoo's group cap left some out.
+    ranked = list(zip(labels, shown, values))[:limit or None]
+    answer = summary_answer(value_label, ranked, not result["truncated"] and len(ranked) == len(labels), smallest)
     if chart == "table":
         return {"kind": "table", "title": title, "columns": [
             {"key": "label", "label": definitions[group]["string"]},
             {"key": "value", "label": value_label},
-        ], "rows": [{"label": label, "value": value} for label, value in zip(labels, values)],
-            "truncated": result["truncated"], "note": note}
+        ], "rows": [{"label": label, "value": value} for label, value in zip(labels, shown)],
+            "truncated": result["truncated"], "note": note, "answer": answer}
+    total = None if operation == "avg" else result["total"] or 0
     return {"kind": "chart", "title": title, "chart_type": chart, "operation": operation, "labels": labels,
-            "values": values, "value_label": value_label, "truncated": result["truncated"], "note": note,
+            "values": values, "shown": shown, "value_label": value_label, "truncated": result["truncated"],
+            "note": note, "answer": answer,
             # Shown under the chart: the AI never sees these values, so it cannot state the total itself.
-            "total": None if operation == "avg" else result["total"] or 0}
+            "total": total, "total_shown": None if total is None else cell_value(model, measure, total)}
+
+
+def summary_answer(measure, rows, complete=True, smallest=None):
+    """A plain first answer from summary rows (name, value shown, value): the one value, or the highest and lowest
+    of every group; of only part of them, its first (``smallest`` says which end), or None when that is unknown."""
+    if not rows:
+        return _("No matching records found.")
+    if len(rows) == 1:
+        return (_("%(names)s — %(measure)s: %(value)s.", names=rows[0][0], measure=measure, value=rows[0][1])
+                if rows[0][0] else _("%(measure)s: %(value)s.", measure=measure, value=rows[0][1]))
+    high, low = max(rows, key=lambda row: row[2]), min(rows, key=lambda row: row[2])
+    if complete:
+        return _("Highest %(measure)s: %(high)s (%(high_value)s). Lowest: %(low)s (%(low_value)s).",
+                 measure=measure, high=high[0], high_value=high[1], low=low[0], low_value=low[1])
+    if smallest is None:
+        return None
+    return (_("Lowest %(measure)s: %(name)s (%(value)s).", measure=measure, name=low[0], value=low[1]) if smallest
+            else _("Highest %(measure)s: %(name)s (%(value)s).", measure=measure, name=high[0], value=high[1]))
 
 
 def cell_value(model, name, value, row=None):
