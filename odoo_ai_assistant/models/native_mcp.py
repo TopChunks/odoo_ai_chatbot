@@ -1606,7 +1606,7 @@ class NativeToolRequest(models.Model):
                 arguments = self.arguments or {}
                 basis = based_on(self.env[model].with_user(self.user_id), arguments.get("domain") or [],
                                  arguments.get("order") or "")
-                title = table.pop("title")
+                title, table["title"] = table["title"], ""  # the "Based on" line names the records
                 if self.tool == "mcp_search_records":
                     answer = (_("Found %(count)s matching records.", count=total) if total
                               else _("No matching records found."))
