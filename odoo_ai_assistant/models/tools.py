@@ -328,6 +328,8 @@ def execute_chart(env, arguments):
                             not result["truncated"], smallest if limit else None)
     if limit:
         pairs = sorted(zip(labels, values), key=lambda pair: pair[1], reverse=not smallest)
+        while limit < len(pairs) and pairs[limit][1] == pairs[limit - 1][1]:  # ties at the cut stay, as Power BI's TOPN
+            limit += 1
         # The rest add up as one "Others" group; an average of averages would mislead, so averages keep the top N only.
         pairs = pairs[:limit] + ([(_("Others"), (result["total"] or 0) - sum(value for _label, value in pairs[:limit]))]
                                  if pairs[limit:] and operation != "avg" else [])

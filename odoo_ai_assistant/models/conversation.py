@@ -676,7 +676,10 @@ class AIConversation(models.Model):
         if self.env["odoo.ai.assistant.config"]._configuration().screen_metadata:
             current = (current_screen(self.env, self.env.context.get("odoo_ai_screen")) or {}).get("app")
             searched = apps or apps_named_in(self.env, current or "")
-            buttons = buttons_named_in(self.env, [*screens, *app_screens(self.env, searched)], question)
+            # A word that names an app means the app, not a button of the same name ("Employees" on department cards).
+            app_names = {name.casefold() for name in self.env["ir.ui.menu"].browse(apps).mapped("name")}
+            buttons = [button for button in buttons_named_in(self.env, [*screens, *app_screens(self.env, searched)],
+                                                             question) if button["label"].casefold() not in app_names]
         return {"kind": "apps", "apps": apps, "buttons": buttons} if apps or buttons else None
 
     def _field_hint(self, reason):
