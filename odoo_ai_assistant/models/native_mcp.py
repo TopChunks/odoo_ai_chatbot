@@ -1307,7 +1307,18 @@ class NativeToolRequest(models.Model):
             "expires_at": fields.Datetime.now() + TOOL_REQUEST_LIFETIME,
         })
         if not entry["mutation"]:
-            result = bridge._execute_native(tool, arguments)
+            # A sorted summary of its first N groups also keeps the groups tied with the last (as charts and Power BI's
+            # TOPN do): one query for MCP Server's default page, trimmed back to N and those ties.
+            limit, page = arguments.get("limit"), bridge._limit_bounds()[0]
+            wide = tool == "mcp_aggregate_records" and arguments.get("order") and type(limit) is int and limit < page
+            result = bridge._execute_native(tool, dict(arguments, limit=page) if wide else arguments)
+            groups = (result.get("structuredContent") or {}).get("groups")
+            if wide and isinstance(groups, list) and len(groups) > limit:
+                key, kept = str(arguments["order"]).split(",")[0].split()[0], limit
+                while kept < len(groups) and groups[kept].get(key) == groups[limit - 1].get(key):
+                    kept += 1
+                result["structuredContent"].update(groups=groups[:kept], has_more=kept < len(groups)
+                                                   or result["structuredContent"].get("has_more"))
             request.write({"result": _json_safe(result), "state": "done"})
         return request
 
@@ -1598,13 +1609,16 @@ class NativeToolRequest(models.Model):
                     measure = next(iter(structured.get("aggregates") or []), "__count")
                     title = (_("%(measure)s by %(groups)s", measure=label(measure),
                                groups=", ".join(label(key) for key in groupby)) if groupby else label(measure))
-                    # Highest and lowest from the rows themselves: right for "most" and "least" questions alike.
+                    # Highest and lowest from the rows themselves: right for "most" and "least" questions alike;
+                    # sorted by the measure, part of the groups still tells its first end (top or bottom N).
+                    first = str((self.arguments or {}).get("order") or "").split(",")[0].split()
+                    smallest = (first[1:2] or ["asc"])[0].lower() == "asc" if first and first[0] == measure else None
                     answer = summary_answer(label(measure), [(" / ".join(
                         str(value[1] if isinstance(value, list) and len(value) == 2 else
                             _("Unassigned") if value in (None, False) else value)
                         for value in (cells.get(key) for key in groupby)), cells[measure], row[measure])
                         for row, cells in zip(rows, table["rows"]) if type(row.get(measure)) in (int, float)],
-                        not structured.get("has_more"))
+                        not structured.get("has_more"), smallest)
         elif self.tool == "mcp_list_record_messages" and self.result:
             # One row per entry, in the scrolling record table instead of one long block of text.
             structured = self.result.get("structuredContent") or {}
