@@ -101,6 +101,11 @@ NATIVE_TOOL_PREFIX = "mcp_"
 PRESS_TOOL = NATIVE_TOOL_PREFIX + "press_button"
 _lt = LazyTranslate(__name__)
 # What a confirmed change shows, by its tool's MCP operation tag (other actions: "Successfully completed").
+# Card titles for built-in read tools, in place of the tool's technical name (a record search is titled by its model,
+# a summary by what it adds up).
+_READ_TITLES = {"get_fields": _lt("Fields"), "list_models": _lt("Available data"),
+                "read_attachment": _lt("Attachment"), "list_record_attachments": _lt("Attachments"),
+                "list_record_messages": _lt("History")}
 _CHANGE_DONE = {"create": _lt("Successfully created"), "write": _lt("Successfully updated"),
                 "unlink": _lt("Successfully deleted")}
 # Tool arguments that name target records; _resolve_plan accepts a record's exact name in them.
@@ -1410,7 +1415,9 @@ class NativeToolRequest(models.Model):
     def _payload(self):
         self.ensure_one()
         config = self.env["odoo.ai.assistant.config"]._configuration()
-        title = self.tool_label or self.tool.removeprefix(NATIVE_TOOL_PREFIX).replace("_", " ")
+        read_title = _READ_TITLES.get(self.tool.removeprefix(NATIVE_TOOL_PREFIX))
+        title = self.env._(read_title) if read_title else (
+            self.tool_label or self.tool.removeprefix(NATIVE_TOOL_PREFIX).replace("_", " "))
         title = title[:1].upper() + title[1:]
         # Built-in tool descriptions are written for the AI provider, not for the user.
         description = ""
@@ -1541,10 +1548,12 @@ class NativeToolRequest(models.Model):
                                   "local_references": self.resolution_snapshot or []},
                                  ensure_ascii=False, indent=2)
         table = None
+        answer = None  # a plain first answer, from the result itself, for a result the AI provider does not see
         if self.tool in {"mcp_search_records", "mcp_aggregate_records"} and self.result:
             structured = self.result.get("structuredContent") or {}
             rows = structured.get("records" if self.tool == "mcp_search_records" else "groups")
             if isinstance(rows, list) and all(isinstance(row, dict) for row in rows):
+                rows = [row for row in rows if row]
                 model = (self.arguments or {})["model"]
                 definitions = self.env[model].with_user(self.user_id).fields_get(attributes=["string"])
 
@@ -1570,10 +1579,38 @@ class NativeToolRequest(models.Model):
                     "columns": [{"key": key, "label": label(key)} for key in keys],
                     "rows": [{key: cell_value(self.env[model].with_user(self.user_id), key.partition(":")[0], value, row)
                               for key, value in row.items()}
-                             for row in rows if row],
+                             for row in rows],
                     "total": total, "offset": offset,
                     "has_more": not requested and offset + len(rows) < total,
                 }
+                if self.tool == "mcp_search_records":
+                    title = table.pop("title")
+                    answer = (_("Found %(count)s matching records.", count=total) if total
+                              else _("No matching records found."))
+                else:
+                    groupby = structured.get("groupby") or []
+                    measure = next(iter(structured.get("aggregates") or []), "__count")
+                    title = (_("%(measure)s by %(groups)s", measure=label(measure),
+                               groups=", ".join(label(key) for key in groupby)) if groupby else label(measure))
+                    # Highest and lowest from the rows themselves: right for "most" and "least" questions alike.
+                    valued = [(row[measure], cells) for row, cells in zip(rows, table["rows"])
+                              if type(row.get(measure)) in (int, float)]
+
+                    def named(cells):
+                        return " / ".join(str(value[1] if isinstance(value, list) and len(value) == 2 else
+                                              _("Unassigned") if value in (None, False) else value)
+                                          for value in (cells.get(key) for key in groupby))
+
+                    if not valued:
+                        answer = _("No matching records found.")
+                    elif len(valued) == 1 or not groupby:
+                        answer = _("%(measure)s: %(value)s.", measure=label(measure), value=valued[0][1][measure])
+                    elif not structured.get("has_more"):
+                        high = max(valued, key=lambda item: item[0])[1]
+                        low = min(valued, key=lambda item: item[0])[1]
+                        answer = _("Highest %(measure)s: %(high)s (%(high_value)s). Lowest: %(low)s (%(low_value)s).",
+                                   measure=label(measure), high=named(high), high_value=high[measure],
+                                   low=named(low), low_value=low[measure])
         elif self.tool == "mcp_list_record_messages" and self.result:
             # One row per entry, in the scrolling record table instead of one long block of text.
             structured = self.result.get("structuredContent") or {}
@@ -1588,7 +1625,7 @@ class NativeToolRequest(models.Model):
             }
         return {
             "kind": "mcp_request", "request_id": self.id, "title": title, "state": self.state,
-            "description": description,
+            "description": description, "answer": answer,
             "mutation": self.mutation, "summary": summary, "details": details[:MAX_REQUEST_DETAIL_CHARS],
             "table": table,
             "images": images, "links": links, "provider": self.provider,

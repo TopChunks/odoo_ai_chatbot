@@ -329,11 +329,12 @@ class AIConversation(models.Model):
         request = self.env["odoo.ai.assistant.tool.request"]._prepare(
             self.with_context(odoo_ai_provider_plan=True), name, arguments,
         )
+        payload = request._payload()
         self._store_answer(
             _("Review this action. No change will occur until you confirm. Business automation, notifications "
               "and related-record changes may run when confirmed.") if request.mutation else
-            _("MCP result retrieved locally. Sharing with your external AI provider requires separate approval."),
-            local_only=True, payload=request._payload(), execution_steps=steps,
+            payload["answer"] or _("Here is what I found in Odoo."),
+            local_only=True, payload=payload, execution_steps=steps,
         )
         return request
 

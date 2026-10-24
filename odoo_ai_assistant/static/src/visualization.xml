@@ -24,7 +24,7 @@
                         </table>
                     </div>
                     <div class="d-flex align-items-center gap-2 mt-2">
-                        <span t-if="payload.table.rows.length" class="small text-muted" role="status">Records <t t-esc="payload.table.offset + 1"/>–<t t-esc="payload.table.offset + payload.table.rows.length"/> of <t t-esc="payload.table.total"/></span>
+                        <span t-if="payload.table.rows.length" class="small text-muted" role="status">Showing <t t-esc="payload.table.offset + 1"/>–<t t-esc="payload.table.offset + payload.table.rows.length"/> of <t t-esc="payload.table.total"/></span>
                         <div t-if="(payload.table.offset || payload.table.has_more) &amp;&amp; props.onPage" class="btn-group" role="group" aria-label="Record pages">
                             <button class="btn btn-sm btn-outline-secondary" t-att-disabled="props.busy || !payload.table.offset" t-on-click="() => props.onPage(true)">‹ Previous</button>
                             <button class="btn btn-sm btn-outline-secondary" t-att-disabled="props.busy || !payload.table.has_more" t-on-click="() => props.onPage(false)">Next ›</button>
