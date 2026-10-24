@@ -36,7 +36,7 @@ else:
         MAX_UPLOAD_BYTES as MAX_UPLOAD_BYTES, _json_safe,
     )
 
-from .tools import cell_value, clean_domain, clean_order, data_access_menus
+from .tools import cell_value, clean_domain, clean_field_names, clean_order, data_access_menus
 from .navigation import button_label, eval_view_expression, visible_for
 from .providers import _vocabulary_pattern
 from .limits import (
@@ -1269,12 +1269,16 @@ class NativeToolRequest(models.Model):
         bridge = conversation.env["odoo.ai.assistant.native.mcp"]
         plan = arguments
         arguments, dependencies = bridge._resolve_plan(tool, plan)
-        # Filters and a summary's sort as models often write them, made valid once references are resolved
-        # (tools.clean_domain, tools.clean_order); a field list with "*" (every field) reads MCP Server's default fields.
+        # Filters, sorts and field names as models often write them, made valid once references are resolved
+        # (tools.clean_domain, tools.clean_order, tools.clean_field_names); a field list with "*" (every field) reads
+        # MCP Server's default fields.
         if "domain" in arguments:
             arguments["domain"] = clean_domain(arguments["domain"])
-        if isinstance(arguments.get("order"), str) and isinstance(arguments.get("aggregates"), list):
-            arguments["order"] = clean_order(arguments["order"], arguments.get("groupby") or [], arguments["aggregates"])
+        if arguments.get("order"):
+            arguments["order"] = clean_order(arguments["order"], arguments.get("groupby") or [],
+                                             arguments.get("aggregates") or [])
+        if isinstance(arguments.get("model"), str) and arguments["model"] in conversation.env:
+            arguments = clean_field_names(conversation.env[arguments["model"]], arguments)
         if isinstance(arguments.get("fields"), list) and "*" in arguments["fields"]:
             del arguments["fields"]
         entry = bridge._entry(tool, arguments)

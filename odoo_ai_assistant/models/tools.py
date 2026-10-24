@@ -2,6 +2,7 @@ import ast
 import contextlib
 import json
 import math
+import re
 from datetime import date, datetime
 
 from odoo import _, fields, release
@@ -132,10 +133,18 @@ def parse_tool_arguments(arguments):
     return arguments
 
 
-def clean_order(order, groupby, aggregates):
-    """A summary's sort as models often write it, by a totalled field ("amount_total desc"), in the form MCP Server
-    accepts: that field's total ("amount_total:sum desc"). Other terms are returned as they are, for MCP Server to
-    refuse when invalid."""
+def clean_order(order, groupby=(), aggregates=()):
+    """A sort as models often write it, made valid: a list, also sent as text ('["name desc"]'), is joined into one
+    sort, and a summary's sort by a totalled field ("amount_total desc") becomes that field's total
+    ("amount_total:sum desc"). Anything else is returned as it is, for MCP Server to refuse when invalid."""
+    for parse in (json.loads, ast.literal_eval):
+        if isinstance(order, str) and order.strip().startswith("["):
+            with contextlib.suppress(ValueError, SyntaxError):
+                order = parse(order.strip())
+    if isinstance(order, (list, tuple)) and all(isinstance(term, str) for term in order):
+        order = ", ".join(order)
+    if not isinstance(order, str):
+        return order
     totals = {spec.partition(":")[0]: spec for spec in aggregates if isinstance(spec, str) and ":" in spec}
     terms = []
     for term in order.split(","):
@@ -144,6 +153,31 @@ def clean_order(order, groupby, aggregates):
             name = totals.get(name, name)
         terms.append(" ".join(filter(None, (name, direction.strip()))))
     return ", ".join(terms)
+
+
+def clean_field_names(model, arguments):
+    """Field names in a filter, grouping, totals, sort or field list made valid where a model took them from a similar
+    model (date_order on Sales Analysis): a name ``model`` lacks becomes its one field with the label that name has
+    elsewhere (date, "Order Date"). Names without exactly one such field are left for Odoo to refuse."""
+    registry = model.env.registry
+
+    def rename(spec):
+        name = re.match(r"\s*(\w*)", spec).group(1) if isinstance(spec, str) else ""
+        if not name or name in model._fields or name.startswith("__"):
+            return spec
+        labels = {registry[other]._fields[name].string for other in registry if name in registry[other]._fields}
+        same = [field.name for field in model._fields.values() if field.string in labels]
+        return spec.replace(name, same[0], 1) if len(same) == 1 else spec
+
+    if isinstance(arguments.get("domain"), list):
+        arguments["domain"] = [[rename(term[0]), *term[1:]] if isinstance(term, (list, tuple)) and term else term
+                               for term in arguments["domain"]]
+    for key in ("groupby", "aggregates", "fields"):
+        if isinstance(arguments.get(key), list):
+            arguments[key] = [rename(spec) for spec in arguments[key]]
+    if isinstance(arguments.get("order"), str):
+        arguments["order"] = ", ".join(rename(term.strip()) for term in arguments["order"].split(","))
+    return arguments
 
 
 def clean_domain(domain):
@@ -224,6 +258,8 @@ def execute_chart(env, arguments):
     domain = [[term[0], term[1], env.uid] if isinstance(term, list) and len(term) == 3 and term[2] == CURRENT_USER
               else term for term in domain]
     model = env[name]
+    named = clean_field_names(model, {"domain": domain, "groupby": [group], "aggregates": [measure]})
+    domain, group, measure = named["domain"], named["groupby"][0], named["aggregates"][0]
     definitions = model.fields_get(attributes=["string", "type", "groupable", "aggregator"])
 
     def groupable(field):
