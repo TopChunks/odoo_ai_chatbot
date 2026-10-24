@@ -17,6 +17,7 @@ from .limits import (
     is_restricted_model,
 )
 from .navigation import accessible_apps, app_structure, screen_details
+from .providers import CHART_TOOL
 
 TOOLS = [
     {
@@ -52,7 +53,6 @@ TOOLS = [
 ]
 _TOOL = {tool["name"]: tool for tool in TOOLS}
 
-CHART_TOOL = "odoo_report"
 _CHART_TYPES = ("bar", "line", "pie", "doughnut", "scatter", "table")
 _DATE_INTERVALS = ("day", "week", "month", "quarter", "year")
 _GROUPABLE_TYPES = {"char", "selection", "boolean", "many2one", "many2many", "date", "datetime",

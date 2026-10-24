@@ -350,8 +350,11 @@ def _inspect_screen(env, menu, path):
             classes = " ".join(cls for cls in styles if cls != "btn" or len(styles) == 1)
             icon = node.get("icon") or ""
             look = {"classes": classes, "icon": icon if icon.startswith(("fa-", "oi-")) else ""}
-            # One entry per label: a button such as Confirm can be highlighted in one state and plain in another.
-            button = buttons.setdefault(label, {"label": label, "looks": [], "views": [], "visibility": visibility})
+            # One entry per label in each view: a button such as Confirm can be highlighted in one state and plain
+            # in another, while the same label in another view can be another button (Apps: Upgrade on a card
+            # offers Enterprise, on an app's form it updates the app).
+            button = buttons.setdefault((label, view_type), {"label": label, "looks": [], "views": [],
+                                                             "visibility": visibility})
             if look not in button["looks"]:
                 button["looks"].append(look)
             if view_type not in button["views"]:
@@ -380,12 +383,13 @@ def screen_details_for_ai(details):
 def buttons_named_in(env, screens, text):
     """The buttons of ``screens`` whose exact label ``text`` names, with their screen and view names, so the chat
     can show what they look like; a button that looks the same on several screens is listed once. Labels match
-    exactly, unlike app names: "opportunity" names a record there, not the Opportunities button."""
+    exactly, case included, unlike app names: "opportunity" names a record there and "installed" is a word, not the
+    Opportunities or Installed button."""
     view_names = dict(env["ir.ui.view"]._fields["type"]._description_selection(env))
     named = {}
     for screen in screens:
         for button in screen.get("buttons", []):
-            if re.search(rf"(?<!\w){re.escape(button['label'])}(?!\w)", text, re.IGNORECASE):
+            if re.search(rf"(?<!\w){re.escape(button['label'])}(?!\w)", text):
                 key = (button["label"], tuple((look["classes"], look["icon"]) for look in button["looks"]))
                 entry = named.setdefault(key, {**button, "screens": [], "views": []})
                 entry["screens"].append(screen["menu"])

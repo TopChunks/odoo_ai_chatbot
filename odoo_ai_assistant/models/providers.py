@@ -20,6 +20,8 @@ from .limits import (
 
 
 _logger = logging.getLogger(__name__)
+# The AI's report tool (tools.execute_chart); named in the instructions only when it is offered.
+CHART_TOOL = "odoo_report"
 
 
 def _prompt_json(value):
@@ -902,9 +904,11 @@ class ProviderClient:
             "answer from the menus; for actual record names or values use the record tools instead. "
             "If no tool supports a data request, explain that an administrator must allow the AI to "
             "use that Odoo data in AI Settings. "
-            "For totals, counts, rankings, trends, comparisons and charts call odoo_report; never fabricate data or "
-            "chart markup. For record lists request only the needed fields, in alphabetical name order "
-            "when appropriate. "
+            + ("For totals, counts, rankings, trends, comparisons and charts call %s. " % CHART_TOOL
+               if any(tool.get("name") == CHART_TOOL for tool in tools) else "")
+            + ("" if tools else "No tools can be used for this answer; never write tool or function calls. ")
+            + "Never fabricate data or chart markup. For record lists request only the needed fields, in "
+            "alphabetical name order when appropriate. "
             + ("" if native_tools else
                "Do not request other writes, posting, confirmation, deletion or confidential information. ")
             + "Use readable Markdown for explanations: short paragraphs, lists, bold labels and fenced "
