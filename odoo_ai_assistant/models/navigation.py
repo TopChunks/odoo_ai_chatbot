@@ -383,13 +383,14 @@ def screen_details_for_ai(details):
 def buttons_named_in(env, screens, text):
     """The buttons of ``screens`` whose exact label ``text`` names, with their screen and view names, so the chat
     can show what they look like; a button that looks the same on several screens is listed once. Labels match
-    exactly, case included, unlike app names: "opportunity" names a record there and "installed" is a word, not the
-    Opportunities or Installed button."""
+    exactly, unlike app names: "opportunity" names a record there, not the Opportunities button. Case counts too,
+    unless ``text`` speaks of a button ("the upgrade button"): "installed" alone is a word, not the Installed button."""
     view_names = dict(env["ir.ui.view"]._fields["type"]._description_selection(env))
+    flags = re.IGNORECASE if re.search(rf"(?<!\w){re.escape(env._('button'))}", text, re.IGNORECASE) else 0
     named = {}
     for screen in screens:
         for button in screen.get("buttons", []):
-            if re.search(rf"(?<!\w){re.escape(button['label'])}(?!\w)", text):
+            if re.search(rf"(?<!\w){re.escape(button['label'])}(?!\w)", text, flags):
                 key = (button["label"], tuple((look["classes"], look["icon"]) for look in button["looks"]))
                 entry = named.setdefault(key, {**button, "screens": [], "views": []})
                 entry["screens"].append(screen["menu"])
