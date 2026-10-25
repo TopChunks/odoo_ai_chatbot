@@ -70,7 +70,9 @@
                     <div class="o_ai_conversations flex-grow-1 overflow-auto py-1">
                         <div t-if="!filteredConversations.length" class="text-muted small p-2">No matching conversations.</div>
                         <div t-foreach="filteredConversations" t-as="chat" t-key="chat.id" class="o_ai_conversation_row d-flex align-items-center" t-att-class="{'o_ai_conversation_selected': state.current?.id === chat.id}">
-                            <button class="btn text-start flex-grow-1 overflow-hidden" t-on-click="() => ai.select(chat)" t-att-disabled="state.busy" t-att-title="chat.name">
+                            <input t-if="renaming.id === chat.id" class="form-control form-control-sm mx-2" t-ref="renameInput" t-model="renaming.name"
+                                   aria-label="Conversation name" t-on-keydown="(ev) => this.renameKeydown(ev, chat)" t-on-blur="() => this.saveRename(chat)"/>
+                            <button t-else="" class="btn text-start flex-grow-1 overflow-hidden" t-on-click="() => ai.select(chat)" t-att-disabled="state.busy" t-att-title="chat.name">
                                 <div class="d-flex align-items-center gap-2">
                                     <img src="/odoo_ai_assistant/static/description/icon.svg" class="o_ai_avatar" alt="" width="40" height="40"/>
                                     <div class="overflow-hidden flex-grow-1">
@@ -84,6 +86,7 @@
                                     </div>
                                 </div>
                             </button>
+                            <button class="btn btn-sm text-muted o_ai_delete" title="Rename conversation" aria-label="Rename conversation" t-on-click="() => this.startRename(chat)" t-att-disabled="state.busy"><i class="fa fa-pencil"/></button>
                             <button class="btn btn-sm text-muted o_ai_delete" title="Delete conversation" aria-label="Delete conversation" t-on-click="() => this.deleteChat(chat)" t-att-disabled="state.busy || state.replying[chat.id]"><i class="fa fa-trash-o"/></button>
                         </div>
                     </div>
@@ -92,7 +95,8 @@
                     <header t-if="props.full" class="o_ai_thread_header d-flex align-items-center gap-2 px-3 py-2 border-bottom flex-shrink-0">
                         <img src="/odoo_ai_assistant/static/description/icon.svg" alt="" width="28" height="28"/>
                         <strong class="text-truncate flex-grow-1" t-esc="state.current?.name || state.assistant_name"/>
-                        <span t-if="state.can_change_model" class="o_ai_model_select" title="AI model for this conversation only; new conversations use the AI Settings model">
+                        <span t-if="state.can_change_model" class="o_ai_model_select d-flex align-items-center gap-1" title="AI model for this conversation only; new conversations use the AI Settings model">
+                            <small class="text-muted">Model</small>
                             <SelectMenu choices="modelChoices" value="currentModel.value" searchable="true" required="true"
                                         disabled="state.busy" onOpened.bind="loadModelChoices" onSelect.bind="selectModel"
                                         togglerClass="'btn btn-sm btn-light text-muted'" searchPlaceholder.translate="Search models"/>
@@ -101,12 +105,12 @@
                     </header>
                     <div class="o_ai_messages flex-grow-1 overflow-auto p-3" t-att-class="{'o_ai_messages_empty': !state.messages.length}" t-ref="messages" t-on-scroll="onMessagesScroll" aria-live="polite" t-att-aria-busy="busy ? 'true' : 'false'">
                         <div t-if="!state.messages.length" class="o_ai_welcome">
-                            <div class="d-flex align-items-center gap-2 mb-2">
+                            <div class="d-flex align-items-center justify-content-center gap-2 mb-2">
                                 <img src="/odoo_ai_assistant/static/description/icon.svg" alt="Colorful magic wand" width="44" height="44"/>
                                 <h2 class="mb-0" t-esc="state.assistant_name"/>
                             </div>
                             <p class="text-muted small mb-3">Ask about your Odoo apps, explore your data with charts, and prepare changes you confirm.</p>
-                            <div t-if="state.suggestions.length" class="o_ai_suggestions d-flex flex-column align-items-start gap-2">
+                            <div t-if="state.suggestions.length" class="o_ai_suggestions d-flex flex-column align-items-center gap-2">
                                 <button t-foreach="state.suggestions" t-as="suggestion" t-key="suggestion_index" class="btn btn-light btn-sm" t-on-click="() => this.suggest(suggestion)" t-att-disabled="busy" t-esc="suggestion"/>
                             </div>
                         </div>
@@ -124,6 +128,8 @@
                                         <time t-if="message.create_date" class="ms-1" t-att-datetime="message.create_date.replace(' ', 'T') + 'Z'" t-att-title="messageDateTitle(message)" t-esc="messageTime(message)"/>
                                         <span t-if="message.provider_sensitive || payload?.state === 'shared'" class="badge text-bg-warning ms-2">Shared with provider</span>
                                         <span t-elif="message.local_only || payload" class="badge text-bg-success ms-2"><i class="fa fa-lock me-1"/>Local only</span>
+                                        <CopyButton t-if="message.role === 'assistant' and content" className="'btn-sm btn-link text-muted p-0 ms-1'"
+                                                    content="content" icon="'fa-clone'" successText.translate="Copied"/>
                                     </div>
                                     <details t-if="message.execution_steps?.length" class="small text-muted mb-2">
                                         <summary>Steps taken</summary>
@@ -191,7 +197,7 @@
                             <div class="o_ai_composer d-flex flex-grow-1 align-items-end border px-2 py-1 gap-2">
                                 <!-- Same "+" menu as the Discuss composer, with only the actions this chat supports. -->
                                 <Dropdown position="'top-start'" menuClass="'o-discuss-dropdownMenu d-flex flex-column'" disabled="busy">
-                                    <button class="o_ai_composer_action btn btn-sm" title="More Actions" aria-label="More Actions"><i class="fa fa-plus-circle"/></button>
+                                    <button class="o_ai_composer_action btn btn-sm" title="Voice message or attach files" aria-label="Voice message or attach files"><i class="fa fa-plus-circle"/></button>
                                     <t t-set-slot="content">
                                         <DropdownItem class="'d-flex align-items-center gap-1'" onSelected="() => this.toggleVoice()"><i class="fa fa-fw fa-microphone"/>Voice Message</DropdownItem>
                                         <DropdownItem t-if="state.can_stage_files" class="'d-flex align-items-center gap-1'" onSelected="() => this.fileInputRef.el?.click()"><i class="fa fa-fw fa-paperclip"/>Attach Files</DropdownItem>

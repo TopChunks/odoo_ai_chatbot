@@ -15,6 +15,9 @@ import { ViewButton } from "@web/views/view_button/view_button";
 import { user } from "@web/core/user";
 import { deserializeDateTime } from "@web/core/l10n/dates";
 import { DateSection } from "@mail/core/common/date_section";
+import { CopyButton } from "@web/core/copy_button/copy_button";
+import { useAutoresize } from "@web/core/utils/autoresize";
+import { useAutofocus } from "@web/core/utils/hooks";
 import { generatePdfThumbnail } from "@mail/utils/common/pdf_thumbnail";
 import { LocalVisualization, visualizationContent, visualizationPayload } from "./visualization";
 
@@ -212,6 +215,15 @@ registry.category("services").add("odoo_ai", {
                     ]);
                 }, { fallback: null });
             },
+            rename(conversation, name) {
+                return service.run(async () => {
+                    await orm.call(MODEL, "rename", [[conversation.id], name]);
+                    if (state.current?.id === conversation.id) {
+                        state.current = { ...state.current, name };
+                    }
+                    await service.refresh();
+                });
+            },
             remove(conversation) {
                 return service.run(async () => {
                     await orm.unlink(MODEL, [conversation.id]);
@@ -297,7 +309,7 @@ registry.category("services").add("odoo_ai", {
 
 export class AssistantPanel extends Component {
     static template = "odoo_ai_assistant.Panel";
-    static components = { LocalVisualization, DateSection, Dropdown, DropdownItem, SelectMenu, ViewButton };
+    static components = { LocalVisualization, DateSection, Dropdown, DropdownItem, SelectMenu, ViewButton, CopyButton };
     static props = { full: { type: Boolean, optional: true } };
 
     setup() {
@@ -314,6 +326,9 @@ export class AssistantPanel extends Component {
         this.userInitial = user.name.trim().charAt(0).toLocaleUpperCase();
         this.messagesRef = useRef("messages");
         this.composerRef = useRef("composer");
+        useAutoresize(this.composerRef);  // the message box grows with its text, as Discuss's composer
+        this.renaming = useState({ id: null, name: "" });
+        useAutofocus({ refName: "renameInput" });
         this.fileInputRef = useRef("fileInput");
         this.lastMessage = null;
         this.lastConversation = null;
@@ -625,6 +640,26 @@ export class AssistantPanel extends Component {
         return date.toDateString() === today.toDateString()
             ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
             : date.toLocaleDateString([], { month: "short", day: "numeric" });
+    }
+
+    startRename(conversation) {
+        Object.assign(this.renaming, { id: conversation.id, name: conversation.name });
+    }
+
+    renameKeydown(ev, conversation) {
+        if (ev.key === "Enter") {
+            ev.target.blur();
+        } else if (ev.key === "Escape") {
+            Object.assign(this.renaming, { id: null, name: conversation.name });
+        }
+    }
+
+    async saveRename(conversation) {
+        const name = this.renaming.name.trim();
+        this.renaming.id = null;
+        if (name && name !== conversation.name) {
+            await this.ai.rename(conversation, name);
+        }
     }
 
     deleteChat(conversation) {

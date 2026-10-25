@@ -141,12 +141,13 @@
         &.o_ai_messages_empty {
             display: flex;
             flex-direction: column;
-            justify-content: flex-end;
+            justify-content: center;
         }
     }
 
     .o_ai_welcome {
         padding: 16px 0 8px;
+        text-align: center;
 
         h2 {
             font-size: 26px;
@@ -344,7 +345,7 @@
     }
 
     textarea {
-        resize: vertical;
+        resize: none;
         max-height: 140px;
         min-height: 30px;
         padding: 5px 4px;

@@ -26,7 +26,8 @@ from .limits import (
     CHANGE_OPERATIONS, CONVERSATION_LOCK_NAMESPACE, CONVERSATION_PREVIEW_CHARS, CREDENTIAL_FIELD, FILE_THUMBNAIL_SIDE,
     MAX_CHART_IMAGE_CHARS, MAX_DISCOVERY_ROUNDS,
     MAX_FIELD_HINT_NAMES, MAX_FILE_NAME_CHARS, MAX_HISTORY_CHARS, MAX_HISTORY_MESSAGES, MAX_LISTED_CONVERSATIONS,
-    MAX_IMAGE_CHARS, MAX_LOADED_MESSAGES, MAX_MESSAGE_CHARS, MAX_MIMETYPE_CHARS, MAX_TITLE_PROMPTS, MAX_TOOL_CALLS,
+    MAX_IMAGE_CHARS, MAX_LOADED_MESSAGES, MAX_MESSAGE_CHARS, MAX_MIMETYPE_CHARS, MAX_TITLE_CHARS, MAX_TITLE_PROMPTS,
+    MAX_TOOL_CALLS,
     WELCOME_SUGGESTIONS, is_restricted_model,
 )
 from .navigation import (
@@ -99,7 +100,9 @@ class AIConversation(models.Model):
             return {**common, "enabled": False, "conversations": [], "suggestions": [], "channel_ids": []}
         # Runs on every page load: a fixed number of queries, however many conversations exist.
         all_conversations = self.search([("user_id", "=", self.env.uid)])
-        conversations = all_conversations[:MAX_LISTED_CONVERSATIONS]
+        # Conversations with messages, and the one empty chat a new chat reuses (see _empty_chat).
+        conversations = self.search([("user_id", "=", self.env.uid), "|", ("message_ids", "!=", False),
+                                     ("id", "=", self._empty_chat().id)], limit=MAX_LISTED_CONVERSATIONS)
         Message = self.env["odoo.ai.assistant.message"]
         latest_ids = [message_id for _conversation, message_id in Message._read_group(
             [("conversation_id", "in", conversations.ids)], ["conversation_id"], ["id:max"],
@@ -191,6 +194,8 @@ class AIConversation(models.Model):
             record.check_access("read")
             name = _("AI: %s") % record.display_name
         title_pending = record_model is None and record_id is None
+        if title_pending and (empty := self._empty_chat()):
+            return {"id": empty.id, "name": empty.name}
         channel = self.env["discuss.channel"].create({
             "name": name, "channel_type": "group",
             "channel_partner_ids": [fields.Command.link(partner.id)],
@@ -231,6 +236,20 @@ class AIConversation(models.Model):
         if not prompts:
             return ""
         return config._client("title", self._model(config)).conversation_title(self._model(config).identifier, prompts)
+
+    def _empty_chat(self):
+        """The user's latest new chat without messages: a new chat reuses it instead of adding another empty one."""
+        return self.search([("user_id", "=", self.env.uid), ("title_pending", "=", True), ("message_ids", "=", False)],
+                           limit=1)
+
+    def rename(self, name):
+        """The user's own name for this conversation, also its Discuss channel's."""
+        self._owned()
+        name = name.strip()[:MAX_TITLE_CHARS] if isinstance(name, str) else ""
+        if not name:
+            raise ValidationError(_("Enter a name for this conversation."))
+        self._apply_title(name)
+        return True
 
     def _apply_title(self, title):
         self.sudo().write({"name": title, "title_pending": False})
