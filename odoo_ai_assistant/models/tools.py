@@ -1,5 +1,6 @@
 import ast
 import contextlib
+import difflib
 import json
 import math
 import re
@@ -13,7 +14,7 @@ from odoo.tools.safe_eval import safe_eval
 from odoo.exceptions import AccessError, UserError, ValidationError
 
 from .limits import (
-    CREDENTIAL_FIELD, CURRENT_USER, MAX_CHART_TITLE_CHARS, MAX_FIELD_SUGGESTIONS, MAX_REPORT_MEASURES, MAX_TIED_NAMES,
+    CLOSE_FIELD_NAME, CREDENTIAL_FIELD, CURRENT_USER, MAX_CHART_TITLE_CHARS, MAX_FIELD_SUGGESTIONS, MAX_REPORT_MEASURES, MAX_TIED_NAMES,
     is_restricted_model,
 )
 from .navigation import accessible_apps, app_structure, screen_details
@@ -155,7 +156,8 @@ def clean_order(order):
 def clean_field_names(model, arguments):
     """Field names in a filter, grouping, totals, sort or field list made valid where a model took them from a similar
     model (date_order on Sales Analysis): a name ``model`` lacks becomes its one field with the label that name has
-    elsewhere (date, "Order Date"). Names without exactly one such field are left for Odoo to refuse."""
+    elsewhere (date, "Order Date"), or else its one close name: an older Odoo's name or a typo (groups_id: group_ids).
+    Names without exactly one such field are left for Odoo to refuse."""
     registry = model.env.registry
 
     def rename(spec):
@@ -163,7 +165,8 @@ def clean_field_names(model, arguments):
         if not name or name in model._fields or name.startswith("__"):
             return spec
         labels = {registry[other]._fields[name].string for other in registry if name in registry[other]._fields}
-        same = [field.name for field in model._fields.values() if field.string in labels]
+        same = [field.name for field in model._fields.values() if field.string in labels] or difflib.get_close_matches(
+            name, model._fields, n=2, cutoff=CLOSE_FIELD_NAME)
         return spec.replace(name, same[0], 1) if len(same) == 1 else spec
 
     if isinstance(arguments.get("domain"), list):

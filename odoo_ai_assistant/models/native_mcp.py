@@ -1595,7 +1595,8 @@ class NativeToolRequest(models.Model):
                                  arguments.get("order") or "")
                 title, table["title"] = table["title"], ""  # the "Based on" line names the records
                 if self.tool == "mcp_search_records":
-                    answer = (_("Found %(count)s matching records.", count=total) if total
+                    answer = (_("Found 1 matching record.") if total == 1
+                              else _("Found %(count)s matching records.", count=total) if total
                               else _("No matching records found."))
         elif self.tool == "mcp_list_record_messages" and self.result:
             # One row per entry, in the scrolling record table instead of one long block of text.

@@ -57,6 +57,8 @@ MAX_CHART_TITLE_CHARS = 120
 MAX_REPORT_MEASURES = 4
 # Groups named in a chart or summary answer when several share the highest or lowest value.
 MAX_TIED_NAMES = 3
+# How alike an unknown field name and a real one must be for the AI's name to be read as the real one (0 to 1).
+CLOSE_FIELD_NAME = 0.85
 MAX_CHART_IMAGE_CHARS = 4_000_000
 
 # App and screen discovery: names the AI may look up, screens and fields it receives.
