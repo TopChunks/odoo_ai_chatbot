@@ -366,12 +366,14 @@ export class AssistantPanel extends Component {
         return this.homeApps.filter((app) => message.payload.apps.includes(app.id));
     }
 
-    shareResult(requestId) {
+    /** A record result is shared by its tool request, a report by its message (no request: share_report). */
+    shareResult(requestId, messageId) {
         this.dialog.add(ConfirmationDialog, {
             title: _t("Share Odoo data with your AI provider?"),
             body: _t("This sends the displayed result and any inline attachment content to %s. Only approve information you are permitted to disclose. This cannot undo disclosure after the provider receives it.", this.state.provider),
             confirmLabel: _t("Share and continue"),
-            confirm: () => this.ai.toolAction("share_tool_result", requestId),
+            confirm: () => requestId ? this.ai.toolAction("share_tool_result", requestId)
+                : this.ai.toolAction("share_report", messageId),
         });
     }
 

@@ -138,7 +138,7 @@
                                     <LocalVisualization t-if="payload" payload="payload" busy="busy"
                                         onConfirm="(id) => ai.toolAction('confirm_tool', id)"
                                         onCancel="(id) => ai.toolAction('cancel_tool', id)"
-                                        onShare="(id) => this.shareResult(id)"
+                                        onShare="(id) => this.shareResult(id, message.id)"
                                         onPage="(previous) => ai.loadRecordPage(message.id, previous)"
                                         onExport="(format, image) => ai.exportChart(message.id, format, image)"/>
                                     <div t-if="formatted" class="o_ai_bubble o_ai_formatted o-mail-Message-bubble border o-rounded-bubble" t-att-class="{'o-green': message.role === 'user', 'o-blue': message.role === 'assistant'}" t-out="formatted"/>

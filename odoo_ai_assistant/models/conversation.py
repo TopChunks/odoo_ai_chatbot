@@ -26,7 +26,7 @@ from .limits import (
     CHANGE_OPERATIONS, CONVERSATION_LOCK_NAMESPACE, CONVERSATION_PREVIEW_CHARS, CREDENTIAL_FIELD, FILE_THUMBNAIL_SIDE,
     MAX_CHART_IMAGE_CHARS, MAX_DISCOVERY_ROUNDS,
     MAX_FIELD_HINT_NAMES, MAX_FILE_NAME_CHARS, MAX_HISTORY_CHARS, MAX_HISTORY_MESSAGES, MAX_LISTED_CONVERSATIONS,
-    MAX_IMAGE_CHARS, MAX_LOADED_MESSAGES, MAX_MESSAGE_CHARS, MAX_MIMETYPE_CHARS, MAX_TITLE_CHARS, MAX_TITLE_PROMPTS,
+    MAX_IMAGE_CHARS, MAX_LOADED_MESSAGES, MAX_MESSAGE_CHARS, MAX_SHARED_EVIDENCE_CHARS, MAX_MIMETYPE_CHARS, MAX_TITLE_CHARS, MAX_TITLE_PROMPTS,
     MAX_TOOL_CALLS,
     WELCOME_SUGGESTIONS, is_restricted_model,
 )
@@ -214,10 +214,16 @@ class AIConversation(models.Model):
             ["role", "content", "local_only", "payload", "execution_steps", "create_date", "provider_sensitive"],
             order="id desc", limit=MAX_LOADED_MESSAGES,
         )
+        config = self.env["odoo.ai.assistant.config"]._configuration()
         for message in messages:
-            if message["payload"] and message["payload"].get("kind") == "mcp_request":
-                request = self._tool_request(message["payload"]["request_id"])
+            payload = message["payload"]
+            if payload and payload.get("kind") == "mcp_request":
+                request = self._tool_request(payload["request_id"])
                 message["payload"] = request._payload()
+            elif payload and (payload.get("query") or {}).get("tool") == CHART_TOOL:
+                # A report kept in Odoo is shared on the user's approval, as a record result is (share_report).
+                payload.update(provider=config.provider, sharing_allowed=bool(
+                    config.business_data_sharing and config.local_tools and payload.get("state") != "shared"))
             if message["role"] == "assistant" and not message["local_only"]:
                 message["content_html"] = format_reply(message["content"])
         if mark_read and messages:
@@ -412,6 +418,30 @@ class AIConversation(models.Model):
             self._dispatch_with_recovery(client, config, history, calls, [], tools, options, False, shared=shared)
         else:
             self._store_answer(text, provider_sensitive=True)
+        return self.get_messages()
+
+    def share_report(self, message_id):
+        """Shares a report shown in this chat with the AI on the user's approval, so it can explain it. The report
+        runs again with the user's access: only current figures they may see are sent, never the stored copy."""
+        self._owned()
+        message = self.env["odoo.ai.assistant.message"].search(
+            [("id", "=", message_id), ("conversation_id", "=", self.id), ("local_only", "=", True)])
+        query = (message.payload or {}).get("query") or {}
+        config = self._check_enabled()
+        if query.get("tool") != CHART_TOOL or not (config.local_tools and config.business_data_sharing):
+            raise AccessError(_("Sharing results with the AI provider is turned off in AI Settings."))
+        self._lock_conversation(_("An answer is already being generated for this conversation."))
+        report = execute_chart(self.env, query["arguments"])
+        evidence = {"tool": CHART_TOOL, **{key: report[key] for key in (
+            "title", "basis", "answer", "note", "value_label", "labels", "shown", "total_label", "total_shown",
+            "columns", "rows") if report.get(key) not in (None, "")}}
+        if len(json.dumps(evidence, default=str)) > MAX_SHARED_EVIDENCE_CHARS:
+            raise UserError(_("This result is too large to share. Request fewer records or fields."))
+        model = self._model(config)
+        text, _calls = config._client("reply", model).reply(model.identifier, self._provider_history(), [],
+                                                            tool_context=evidence)
+        message.sudo().payload = dict(message.payload, state="shared")
+        self._store_answer(text, provider_sensitive=True)
         return self.get_messages()
 
     def stage_upload(self, name, data, mimetype=None, thumbnail=None):

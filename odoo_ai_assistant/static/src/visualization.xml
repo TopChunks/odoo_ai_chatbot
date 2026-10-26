@@ -68,13 +68,6 @@
                     <button type="button" class="btn btn-sm btn-outline-secondary" t-att-disabled="props.busy"
                         t-on-click="() => props.onCancel(payload.request_id)">Cancel</button>
                 </div>
-                <div t-if="payload.sharing_allowed &amp;&amp; props.onShare" class="mt-2">
-                    <p class="small text-warning mb-1">Share this displayed result and any inline attachment content with
-                        <strong t-esc="payload.provider"/> to let AI analyze it or choose the next tool.
-                        No sharing occurs until you approve.</p>
-                    <button type="button" class="btn btn-sm btn-outline-primary" t-att-disabled="props.busy"
-                        t-on-click="() => props.onShare(payload.request_id)">Share and continue</button>
-                </div>
                 <p t-if="payload.state === 'done' &amp;&amp; !payload.sharing_allowed" class="small text-muted mt-2 mb-0">
                     Result stays inside Odoo. Administrator approval is required for provider sharing.
                 </p>
@@ -125,6 +118,13 @@
                     <button type="button" class="btn btn-sm btn-outline-primary" t-att-disabled="props.busy" t-on-click="() => this.exportAs('xlsx')"><i class="fa fa-file-excel-o me-1" aria-hidden="true"/>Export as Excel</button>
                 </div>
             </t>
+            <div t-if="payload.sharing_allowed &amp;&amp; props.onShare" class="mt-2">
+                <p class="small text-warning mb-1">Share this displayed result and any inline attachment content with
+                    <strong t-esc="payload.provider"/> to let AI analyze it or choose the next tool.
+                    No sharing occurs until you approve.</p>
+                <button type="button" class="btn btn-sm btn-outline-primary" t-att-disabled="props.busy"
+                    t-on-click="() => props.onShare(payload.request_id)">Share and continue</button>
+            </div>
         </section>
     </t>
 </templates>
