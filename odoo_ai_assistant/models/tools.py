@@ -349,7 +349,8 @@ def execute_chart(env, arguments):
                      for label, values in rows],
             "truncated": result["truncated"], "note": note, "answer": answer, "basis": basis}
     values = [values[0] for _label, values in rows]
-    total = None if specs[0].endswith(":avg") else totals[0]
+    # A total that cannot be matched to the rows shown (top 3 by order count, no "Others") is left out.
+    total = None if specs[0].endswith(":avg") or not additive and len(rows) < len(result["rows"]) else totals[0]
     return {"kind": "chart", "title": title, "chart_type": chart, "labels": [label for label, _values in rows],
             "operation": "avg" if specs[0].endswith(":avg") else "sum" if specs[0].endswith(":sum") else "count",
             "values": values, "shown": [shown([value])[0] for value in values], "value_label": labels[0],
@@ -533,6 +534,8 @@ def summary_answer(measure, rows, complete=True, smallest=None):
 
     if smallest is None:
         (high, high_value), (low, low_value) = end(max), end(min)
+        if high == low:  # every group has the same value
+            return _("%(measure)s: %(names)s (%(value)s).", measure=measure, names=high, value=high_value)
         return _("Highest %(measure)s: %(high)s (%(high_value)s). Lowest: %(low)s (%(low_value)s).",
                  measure=measure, high=high, high_value=high_value, low=low, low_value=low_value)
     name, value = end(min if smallest else max)
