@@ -92,7 +92,7 @@
                     <div class="o_ai_data_scroll" tabindex="0" role="region" aria-label="Chart data table">
                         <table class="table table-sm table-striped mb-0">
                             <caption class="caption-top">Chart data: <t t-esc="payload.title"/></caption>
-                            <thead><tr><th scope="col">Label</th><th scope="col" t-esc="payload.value_label"/></tr></thead>
+                            <thead><tr><th scope="col" t-esc="payload.group_label || 'Label'"/><th scope="col" t-esc="payload.value_label"/></tr></thead>
                             <tbody>
                                 <tr t-foreach="payload.labels" t-as="label" t-key="label_index">
                                     <th scope="row" t-esc="label"/>
@@ -100,7 +100,7 @@
                                 </tr>
                                 <tr t-if="!payload.labels.length"><td colspan="2">No data available.</td></tr>
                             </tbody>
-                            <tfoot t-if="typeof payload.total === 'number'"><tr><th scope="row">Total</th><th t-esc="payload.total_shown !== undefined ? payload.total_shown : payload.total"/></tr></tfoot>
+                            <tfoot t-if="typeof payload.total === 'number'"><tr><th scope="row" t-esc="payload.total_label || 'Total'"/><th t-esc="payload.total_shown !== undefined ? payload.total_shown : payload.total"/></tr></tfoot>
                         </table>
                     </div>
                 </t>

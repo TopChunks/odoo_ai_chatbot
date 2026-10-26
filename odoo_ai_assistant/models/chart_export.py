@@ -27,7 +27,7 @@ def _cell(value):
 def export_table(payload):
     """(title, headers, rows) of a chart or table payload."""
     if payload["kind"] == "chart":
-        return payload["title"], [_("Label"), payload["value_label"]], list(zip(payload["labels"], payload["values"]))
+        return payload["title"], [payload.get("group_label") or _("Label"), payload["value_label"]], list(zip(payload["labels"], payload["values"]))
     columns = payload["columns"]
     rows = [[_cell(row.get(column["key"])) for column in columns] for row in payload["rows"]]
     return payload.get("title") or "", [column["label"] for column in columns], rows

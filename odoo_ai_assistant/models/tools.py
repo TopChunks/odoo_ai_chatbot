@@ -280,7 +280,7 @@ def execute_chart(env, arguments):
         field, _sep, operation = spec.partition(":")
         definition = definitions.get(field) or {}
         if field == "__count" or operation == "count_distinct" and definition:
-            labels.append(_("Count") if field == "__count" else _("%s (count)") % definition["string"])
+            labels.append(_("Count") if field == "__count" else _("%s count") % definition["string"])
             continue
         if operation not in ("sum", "avg") or definition.get("type") not in _NUMERIC_TYPES \
                 or not definition.get("aggregator"):
@@ -353,11 +353,14 @@ def execute_chart(env, arguments):
     return {"kind": "chart", "title": title, "chart_type": chart, "labels": [label for label, _values in rows],
             "operation": "avg" if specs[0].endswith(":avg") else "sum" if specs[0].endswith(":sum") else "count",
             "values": values, "shown": [shown([value])[0] for value in values], "value_label": labels[0],
+            "group_label": definitions[group]["string"],
             "truncated": result["truncated"], "note": note, "answer": answer, "basis": basis,
             # Bottom N: "Others" is far larger than them, so it stays in the table and total but is not drawn.
             "bars": limit if smallest and limit and len(values) > limit else None,
             # Shown under the chart: the AI never sees these values, so it cannot state the total itself.
-            "total": total, "total_shown": None if total is None else shown([total])[0]}
+            "total": total, "total_shown": None if total is None else shown([total])[0],
+            # A document on several rows (an order with two products) is in the total once: say so.
+            "total_label": _("Total") if additive else _("Total (each %s counted once)", definitions[fields_used[0]]["string"])}
 
 
 def document_link(report, document=None):
@@ -470,6 +473,12 @@ def based_on(model, domain, order="", what=""):
             and isinstance(item[0], str) else (None, None, None)
         if field is None:
             return str(item)
+        if field.type == "selection" and item[1] in ("!=", "not in"):
+            # "Status: Sales Order" reads better than the three statuses left out.
+            excluded = item[2] if isinstance(item[2], (list, tuple)) else [item[2]]
+            kept = [key for key, _label in field._description_selection(env) if key not in excluded]
+            if 0 < len(kept) < len(excluded):
+                item = (item[0], "in", kept)
         dated = field.type in ("date", "datetime")
         words = {"=": "%s", "in": "%s", "!=": _("not %s"), "not in": _("not %s"),
                  ">": _("after %s") if dated else _("more than %s"), ">=": _("from %s") if dated else _("at least %s"),
@@ -517,8 +526,9 @@ def summary_answer(measure, rows, complete=True, smallest=None):
 
     def end(pick):
         tied = [row for row in rows if row[2] == pick(row[2] for row in rows)]
-        names = ", ".join(row[0] for row in tied[:MAX_TIED_NAMES]) + (
-            _(" and %s more", len(tied) - MAX_TIED_NAMES) if len(tied) > MAX_TIED_NAMES else "")
+        names = [row[0] for row in tied[:MAX_TIED_NAMES]] + (
+            [_("%s more", len(tied) - MAX_TIED_NAMES)] if len(tied) > MAX_TIED_NAMES else [])
+        names = _("%(first)s and %(last)s", first=", ".join(names[:-1]), last=names[-1]) if len(names) > 1 else names[0]
         return names, tied[0][1] if len(tied) == 1 else _("%s each", tied[0][1])
 
     if smallest is None:
