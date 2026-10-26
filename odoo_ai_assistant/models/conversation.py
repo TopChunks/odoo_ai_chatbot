@@ -1,4 +1,5 @@
 import base64
+import difflib
 import json
 import logging
 import re
@@ -741,14 +742,19 @@ class AIConversation(models.Model):
         return {"kind": "apps", "apps": apps, "buttons": buttons} if apps or buttons else None
 
     def _field_hint(self, reason):
-        """For an invented field (Odoo: "Invalid field <model>.<field>"), list the model's real field names."""
+        """For an invented field (Odoo: "Invalid field <model>.<field>" or "Invalid field '<field>' on '<model>'"),
+        the model's real field names, the closest first: a name from an older Odoo (groups_id) finds its new one."""
         match = re.search(r"Invalid field ([a-z0-9_.]+)\.([a-z0-9_]+)", reason)
-        model = match and match.group(1)
+        model, field = match.groups() if match else (None, None)
+        if not match and (match := re.search(r"Invalid field '([a-z0-9_]+)' on '([a-z0-9_.]+)'", reason)):
+            field, model = match.groups()
         if not model or is_restricted_model(self.env, model) or not self.env[model].has_access("read"):
             return ""
         names = sorted(name for name in self.env[model].fields_get(attributes=["type"])
                        if not CREDENTIAL_FIELD.search(name))
-        return " Fields available on %s: %s." % (model, ", ".join(names[:MAX_FIELD_HINT_NAMES]))
+        close = difflib.get_close_matches(field, names, cutoff=0.6)
+        return (" Did you mean: %s?" % ", ".join(close) if close else "") + " Fields available on %s: %s." % (
+            model, ", ".join(names[:MAX_FIELD_HINT_NAMES]))
 
     def _tools_for(self, tools, action, operation=None):
         """Tools for an action: only native tools that change data (the native request validates the
