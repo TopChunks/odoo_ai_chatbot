@@ -1015,8 +1015,8 @@ class ProviderClient:
             if "named_menus" in screen_context:
                 system += ("named_menus lists each screen the request names: its full path (App / Menu / ...), the "
                            "model of its records and whether you may read them (ai_can_read). Use it to say where the "
-                           "screen is and which model it uses; when ai_can_read is false, say an administrator can "
-                           "allow that model in MCP Server. ")
+                           "screen is and which model it uses; when ai_can_read is false, give why_not as written "
+                           "(without it, say an administrator can allow that model in MCP Server). ")
             if "current_screen" in screen_context:
                 system += ("current_screen, when present, is the app and screen the user has open right now; use it "
                            "to answer where the user is or what they are looking at. ")

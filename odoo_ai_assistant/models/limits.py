@@ -106,8 +106,12 @@ RESTRICTED_MODEL_PREFIXES = (
     "ir.", "mail.", "discuss.", "bus.", "mcp.", "odoo.ai.", "auth.", "payment.", "res.users.",
 )
 RESTRICTED_MODELS = frozenset({
-    "res.users", "res.users.apikeys", "res.groups", "res.config", "res.config.settings",
+    "res.users.apikeys", "res.groups", "res.config", "res.config.settings",
 })
+# Read by every internal user in Odoo (chat, followers) yet shown only to those who manage them: once enabled in MCP
+# Server, the AI uses them only for users whose menus open one of their screens (Users: user administrators). Their
+# credential fields are never used (CREDENTIAL_FIELD); changes need Odoo's rights and a confirmation.
+SCREEN_ONLY_MODELS = frozenset({"res.users"})
 
 
 def is_restricted_model(env, model, allowed=()):
@@ -119,4 +123,8 @@ def is_restricted_model(env, model, allowed=()):
         return True
     if model in allowed:
         return False
+    if model in SCREEN_ONLY_MODELS:
+        actions = env["ir.actions.act_window"].sudo().search([("res_model", "=", model)]).ids
+        return not any(menu.get("action_model") == "ir.actions.act_window" and menu.get("action_id") in actions
+                       for menu in env["ir.ui.menu"].load_menus(False).values())
     return model in RESTRICTED_MODELS or model.startswith(RESTRICTED_MODEL_PREFIXES)

@@ -716,11 +716,13 @@ class AIConversation(models.Model):
         """Screen context naming where each screen in the latest question is, its model and whether the AI may read
         that model's records ({} when the question names no screen)."""
         named = menus_named_in(self.env, self._latest_question())
-        readable = set(chart_models(self.env)) if named and self.env[
-            "odoo.ai.assistant.config"]._configuration().local_tools else set()
+        local_tools = self.env["odoo.ai.assistant.config"]._configuration().local_tools
+        readable = set(chart_models(self.env)) if named and local_tools else set()
         for menu in named:
             if "model" in menu:
                 menu["ai_can_read"] = menu["model"] in readable
+                if local_tools and not menu["ai_can_read"]:  # Odoo's own reason: never available, or what to tick
+                    menu["why_not"] = self.env["odoo.ai.assistant.native.mcp"]._refusal(menu["model"]).args[0]
         return {"named_menus": named} if named else {}
 
     def _named_apps(self, screens=()):
