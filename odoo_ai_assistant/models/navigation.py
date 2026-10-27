@@ -159,9 +159,17 @@ def screens_named_in(env, text, models):
             if rank is not None:
                 named.append((rank, path, filters))
     named.sort(key=lambda item: item[0])
-    return [{"screen": path, "filters": filters, **(_screen_fields(env[_screen_action(env, path).res_model])
-                                                    if index < MAX_SCREEN_DETAILS else {})}
-            for index, (_rank, path, filters) in enumerate(named[:MAX_SCREEN_MATCHES])]
+    screens, detailed = [], set()
+    for index, (_rank, path, filters) in enumerate(named[:MAX_SCREEN_MATCHES]):
+        model = env[_screen_action(env, path).res_model]
+        screens.append({"screen": path, "model": model._name, "filters": filters})
+        if index < MAX_SCREEN_DETAILS and model._name not in detailed:  # each model's fields once
+            details = _screen_fields(model)
+            if detailed:  # condition fields of the best match only: they are long
+                details.pop("conditions")
+            detailed.add(model._name)
+            screens[-1].update(details)
+    return screens
 
 
 def _screen_action(env, path):
@@ -171,10 +179,15 @@ def _screen_action(env, path):
 def _screen_fields(model):
     """What a report on ``model`` can be grouped by and add up, by the labels its screens show, so a model picks
     "Lost Reason" from a short list instead of writing a field name: linked records, choices and dates, and the
-    numbers Odoo can total. Credential fields are left out."""
-    fields = model.fields_get(attributes=["string", "type", "groupable", "aggregator", "store"])
+    numbers Odoo can total; and its real fields for conditions, a choice field with its values, so no condition is
+    written on a field the model does not have (a "type" for quotations, which are a status). Credential fields are
+    left out."""
+    fields = model.fields_get(attributes=["string", "type", "groupable", "aggregator", "store", "selection"])
     usable = {name: field for name, field in fields.items() if field.get("store") and not CREDENTIAL_FIELD.search(name)}
     return {
+        "conditions": {name: field["string"] + (": " + ", ".join("%s=%s" % option for option in field["selection"])
+                                                if field["type"] == "selection" else "")
+                       for name, field in usable.items() if field["type"] not in ("binary", "html", "json", "properties")},
         "group_by": sorted({field["string"] for field in usable.values() if field.get("groupable")
                             and field["type"] in ("many2one", "selection", "boolean", "date", "datetime")}),
         "measures": ["Count"] + sorted({field["string"] for name, field in usable.items() if name != "id"

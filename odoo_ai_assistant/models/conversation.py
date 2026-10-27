@@ -817,7 +817,7 @@ class AIConversation(models.Model):
         # The reason is for the AI (field names, filters); the user sees plain words, the server log the reason.
         _logger.info("AI conversation %s: first try refused (%s): %s", self.id,
                      ", ".join(call["name"] for call in calls), reason[:MAX_SCHEMA_ERROR_CHARS])
-        self._add_step(steps, _("Odoo could not run the AI's first try, so it is trying another way"))
+        self._add_step(steps, _("Correcting the request"))
         latest = history[-1]
         retry_history = history[:-1] + [dict(latest, content=latest["content"] + (
             "\n\n[Odoo note: the tool call you chose could not run: %s.%s Choose a different available tool "
