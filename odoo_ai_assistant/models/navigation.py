@@ -176,11 +176,11 @@ def screens_named_in(env, text, models):
                                                             env[action.res_model]._description))
                          if _shares_word(words, _words(names))), None)
             if rank is not None:
-                named.append((rank, path, filters))
+                named.append((rank, path, filters, action.res_model))
     named.sort(key=lambda item: item[0])
     screens, detailed = [], set()
-    for index, (_rank, path, filters) in enumerate(named[:MAX_SCREEN_MATCHES]):
-        model = env[_screen_action(env, path).res_model]
+    for index, (_rank, path, filters, model_name) in enumerate(named[:MAX_SCREEN_MATCHES]):
+        model = env[model_name]
         screens.append({"screen": path, "model": model._name, "filters": filters})
         if index < MAX_SCREEN_DETAILS and model._name not in detailed:  # each model's fields once
             details = _screen_fields(model)
@@ -189,10 +189,6 @@ def screens_named_in(env, text, models):
             detailed.add(model._name)
             screens[-1].update(details)
     return screens
-
-
-def _screen_action(env, path):
-    return next(action for screen, action in _window_screens(env) if screen == path)
 
 
 def _screen_fields(model):
@@ -252,7 +248,8 @@ def screen_search(env, screen, filters=()):
         group, text = known[str(name).casefold()]
         groups.setdefault(group, []).append(Domain(safe_eval(text, context)))
     domain = Domain.AND([Domain(safe_eval(action.domain or "[]", context)), *map(Domain.OR, groups.values())])
-    return action.res_model, [list(term) if isinstance(term, tuple) else term for term in domain]
+    # "Every record" (a screen without conditions) is no condition at all, not Odoo's [1, "=", 1].
+    return action.res_model, [] if domain.is_true() else [list(term) if isinstance(term, tuple) else term for term in domain]
 
 
 def unknown_model_names(env, text):

@@ -289,6 +289,13 @@ def with_archived(model, domain):
     return domain
 
 
+def report_evidence(report):
+    """What the AI is given of a report it may read: its title, basis, answer, figures and table, never more."""
+    return {"tool": CHART_TOOL, **{key: report[key] for key in (
+        "title", "basis", "answer", "note", "value_label", "labels", "shown", "total_label", "total_shown",
+        "columns", "rows") if report.get(key) not in (None, "")}}
+
+
 def available_tools(env):
     app_tool = _TOOL["odoo_app_structure"]
     tools = [_TOOL["odoo_instance_info"], {

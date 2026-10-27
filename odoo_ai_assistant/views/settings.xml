@@ -40,7 +40,7 @@
                         </setting>
                     </block>
                     <block title="Advanced" groups="base.group_no_one">
-                        <setting string="Allow sharing results with the AI provider" help="Off by default. When on, users can click 'Share and continue' on a result so the AI can analyze it. Each share needs the user's approval.">
+                        <setting string="Allow sharing results with the AI provider" help="Off by default. When on, the AI reads the results of its own searches and reports (only what the user may see, never passwords or keys) to explain them, calculate and search further. Those results are sent to the AI provider.">
                             <field name="ai_assistant_business_data_sharing"/>
                         </setting>
                         <setting string="AI data requests per user per minute" help="Protects Odoo from runaway requests (1 to 600).">

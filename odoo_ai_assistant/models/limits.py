@@ -59,6 +59,8 @@ MAX_REPORT_MEASURES = 4
 MAX_TIED_NAMES = 3
 # How many more tries the AI gets after Odoo refuses its request with the reason (a wrong field or value).
 MAX_TOOL_RETRIES = 2
+# With business data sharing on, how many rounds the AI may read results and search again before answering.
+MAX_AGENT_STEPS = 5
 # Shorter words are matched exactly only: a short one is close to too many others (lose, close).
 MIN_MISSPELT_WORD = 6
 # How alike a written name and a real one must be to be read as it (0 to 1): an AI's field name, a misspelt word.

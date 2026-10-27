@@ -22,7 +22,7 @@ from .formatting import format_reply
 from . import chart_export
 from .configuration import _SETTINGS_FIELDS
 from .tools import (
-    CHART_TOOL, available_tools, chart_models, screen_choices, execute_chart, execute_tool, parse_tool_arguments, requested_chart_tool,
+    CHART_TOOL, available_tools, chart_models, report_evidence, screen_choices, execute_chart, execute_tool, parse_tool_arguments, requested_chart_tool,
 )
 from .limits import (
     CHANGE_OPERATIONS, CONVERSATION_LOCK_NAMESPACE, CONVERSATION_PREVIEW_CHARS, CREDENTIAL_FIELD, FILE_THUMBNAIL_SIDE,
@@ -30,7 +30,7 @@ from .limits import (
     MAX_FIELD_HINT_NAMES, MAX_FILE_NAME_CHARS, MAX_HISTORY_CHARS, MAX_HISTORY_MESSAGES, MAX_LISTED_CONVERSATIONS,
     MAX_IMAGE_CHARS, MAX_LOADED_MESSAGES, MAX_MESSAGE_CHARS, MAX_SCHEMA_ERROR_CHARS, MAX_SHARED_EVIDENCE_CHARS,
     MAX_MIMETYPE_CHARS, MAX_TITLE_CHARS, MAX_TITLE_PROMPTS,
-    MAX_TOOL_CALLS, MAX_TOOL_RETRIES,
+    MAX_AGENT_STEPS, MAX_TOOL_CALLS, MAX_TOOL_RETRIES,
     WELCOME_SUGGESTIONS, is_restricted_model,
 )
 from .navigation import (
@@ -435,9 +435,7 @@ class AIConversation(models.Model):
             raise AccessError(_("Sharing results with the AI provider is turned off in AI Settings."))
         self._lock_conversation(_("An answer is already being generated for this conversation."))
         report = execute_chart(self.env, query["arguments"])
-        evidence = {"tool": CHART_TOOL, **{key: report[key] for key in (
-            "title", "basis", "answer", "note", "value_label", "labels", "shown", "total_label", "total_shown",
-            "columns", "rows") if report.get(key) not in (None, "")}}
+        evidence = report_evidence(report)
         if len(json.dumps(evidence, default=str)) > MAX_SHARED_EVIDENCE_CHARS:
             raise UserError(_("This result is too large to share. Request fewer records or fields."))
         model = self._model(config)
@@ -660,6 +658,15 @@ class AIConversation(models.Model):
             text, calls = client.reply(self._model(config).identifier, history[:-1] + [dict(latest, content=latest[
                 "content"] + "\n\n[Odoo note: you answered without reading Odoo. If the answer needs this database's "
                              "records, call a tool now; otherwise give the same answer.]")], reply_tools, **context_options)
+        if not calls and reply_tools and intent in ("READ", "CHART"):
+            # Still not read: Odoo answers itself, never the AI's unread claims about records or access. It
+            # searches the screen the question names when the user may read it, or gives Odoo's own reason why not.
+            screens = (context_options.get("screen_context") or {}).get("screens") or []
+            reasons = [menu["why_not"] for menu in self._menus_named().get("named_menus", []) if menu.get("why_not")]
+            if screens:
+                calls = [{"name": "mcp_search_records", "arguments": {"screen": screens[0]["screen"]}}]
+            elif reasons:
+                text = reasons[0]
         try:
             title = self._topic_title(config)
         except UserError:
@@ -812,9 +819,12 @@ class AIConversation(models.Model):
         """Run the provider's tool calls. If Odoo refuses or rejects a call, tell the provider once
         so it can choose another tool; if that also fails, answer with the reason instead of an error.
         ``shared`` is the result the user agreed to share, when continuing from it (native tools only)."""
-        since = self.env["odoo.ai.assistant.message"].search([("conversation_id", "=", self.id)], order="id desc", limit=1).id
+        since = self._last_message_id()
+        reads = config.business_data_sharing and not (action_request or shared)
         reason = self._try_dispatch(client, config, history, calls, steps, action_request, shared)
         if reason is None:
+            if reads:  # business data sharing on: the AI reads what it found and goes on (_continue_with_results)
+                return self._continue_with_results(client, config, history, steps, tools, options, since)
             # A data answer is checked against the question once; one that does not answer it is redone.
             reason = not (action_request or shared) and self._result_mismatch(client, config, history, since)
             if not reason:
@@ -843,12 +853,56 @@ class AIConversation(models.Model):
                 break
             reason = self._try_dispatch(client, config, retry_history, calls, steps, action_request, shared)
             if reason is None:
-                return
+                return reads and self._continue_with_results(client, config, history, steps, tools, options, since)
         else:
             _logger.info("AI conversation %s: last try refused (%s): %s", self.id,
                          ", ".join(call["name"] for call in calls), reason[:MAX_SCHEMA_ERROR_CHARS])
         self._store_answer(_("I couldn't complete this request in Odoo. Please ask it another way, for example with "
                              "the exact names, dates or filters you want."), local_only=True, execution_steps=steps)
+
+    def _last_message_id(self):
+        """The newest message of this conversation, after which an answer's own messages follow."""
+        return self.env["odoo.ai.assistant.message"].search([("conversation_id", "=", self.id)], order="id desc",
+                                                            limit=1).id
+
+    def _continue_with_results(self, client, config, history, steps, tools, options, since):
+        """With business data sharing on, the AI reads what its searches and reports found, only what this user may
+        read, and goes on as an agent does: more searches (won, then lost) for up to MAX_AGENT_STEPS rounds, then its
+        answer in words with the real figures (a win rate, a reason, a comparison). Without a final text, the
+        results shown stand as the answer."""
+        found = []
+        for _round in range(MAX_AGENT_STEPS):
+            found += self._read_results(since)
+            since = self._last_message_id()
+            self._add_step(steps, _("Reading the results"))
+            text, calls = client.reply(self._model(config).identifier, history, tools, **dict(options, tool_context=found))
+            if not calls:
+                if text.strip():
+                    self._store_answer(text, execution_steps=steps, provider_sensitive=True)
+                return
+            reason = self._try_dispatch(client, config, history, calls, steps, False)
+            if reason:
+                found.append({"refused": reason[:MAX_SCHEMA_ERROR_CHARS]})
+
+    def _read_results(self, since):
+        """What the searches and reports stored after message ``since`` found, as sent to the AI: a search's checked
+        sharing context (fresh, within the user's rights and size limits), a report's figures; marked as shared."""
+        results = []
+        for message in self.env["odoo.ai.assistant.message"].sudo().search(
+                [("conversation_id", "=", self.id), ("id", ">", since)]):
+            payload = message.payload or {}
+            if payload.get("kind") == "mcp_request" and not payload.get("mutation"):
+                request = self.env["odoo.ai.assistant.tool.request"].browse(payload["request_id"])
+                try:
+                    results.append(request._sharing_context(self)[0])
+                except (UserError, AccessError) as error:  # too large or changed: the AI is told so
+                    results.append({"tool": request.sudo().tool, "not_shared": str(error)})
+                    continue
+                request.sudo().state = "shared"
+            elif (payload.get("query") or {}).get("tool") == CHART_TOOL:
+                results.append(report_evidence(payload))
+                message.payload = dict(payload, state="shared")
+        return results
 
     def _result_mismatch(self, client, config, history, since):
         """Why the data answers stored after message ``since`` do not answer the question, judged by the AI from
