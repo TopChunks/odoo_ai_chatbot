@@ -27,7 +27,8 @@ from .limits import (
     CHANGE_OPERATIONS, CONVERSATION_LOCK_NAMESPACE, CONVERSATION_PREVIEW_CHARS, CREDENTIAL_FIELD, FILE_THUMBNAIL_SIDE,
     MAX_CHART_IMAGE_CHARS, MAX_DISCOVERY_ROUNDS,
     MAX_FIELD_HINT_NAMES, MAX_FILE_NAME_CHARS, MAX_HISTORY_CHARS, MAX_HISTORY_MESSAGES, MAX_LISTED_CONVERSATIONS,
-    MAX_IMAGE_CHARS, MAX_LOADED_MESSAGES, MAX_MESSAGE_CHARS, MAX_SHARED_EVIDENCE_CHARS, MAX_MIMETYPE_CHARS, MAX_TITLE_CHARS, MAX_TITLE_PROMPTS,
+    MAX_IMAGE_CHARS, MAX_LOADED_MESSAGES, MAX_MESSAGE_CHARS, MAX_SCHEMA_ERROR_CHARS, MAX_SHARED_EVIDENCE_CHARS,
+    MAX_MIMETYPE_CHARS, MAX_TITLE_CHARS, MAX_TITLE_PROMPTS,
     MAX_TOOL_CALLS,
     WELCOME_SUGGESTIONS, is_restricted_model,
 )
@@ -813,7 +814,9 @@ class AIConversation(models.Model):
         reason = self._try_dispatch(client, config, history, calls, steps, action_request, shared)
         if reason is None:
             return
-        # The reason is for the AI (field names, filters); the user sees plain words.
+        # The reason is for the AI (field names, filters); the user sees plain words, the server log the reason.
+        _logger.info("AI conversation %s: first try refused (%s): %s", self.id,
+                     ", ".join(call["name"] for call in calls), reason[:MAX_SCHEMA_ERROR_CHARS])
         self._add_step(steps, _("Odoo could not run the AI's first try, so it is trying another way"))
         latest = history[-1]
         retry_history = history[:-1] + [dict(latest, content=latest["content"] + (
@@ -826,6 +829,8 @@ class AIConversation(models.Model):
             reason = self._try_dispatch(client, config, retry_history, retry_calls, steps, action_request, shared)
             if reason is None:
                 return
+            _logger.info("AI conversation %s: second try refused (%s): %s", self.id,
+                         ", ".join(call["name"] for call in retry_calls), reason[:MAX_SCHEMA_ERROR_CHARS])
         elif text.strip():
             self._store_answer(text, execution_steps=steps, payload=self._named_apps(), provider_sensitive=bool(shared))
             return
