@@ -1013,7 +1013,9 @@ class ProviderClient:
                 system += ("screens are Odoo screens the request may mean, each with its own filters. When one fits, "
                            "search or report with its screen and filters as listed instead of writing those "
                            "conditions: Odoo applies them as its screen does (archived and lost records, statuses, "
-                           "document types); add in domain only what no filter covers, such as dates or names. If no "
+                           "document types); add in domain only what no filter covers, such as dates or names. For a "
+                           "report, group by and measure with the labels a screen lists, choosing the one that answers "
+                           "the question (a reason for why, a stage, a person, a date). If no "
                            "screen or model holds the kind of record asked, say this Odoo has none; never show "
                            "another kind instead. ")
             if "named_menus" in screen_context:

@@ -12,7 +12,7 @@ from odoo.tools.safe_eval import safe_eval
 
 from .limits import (
     CREDENTIAL_FIELD, MAX_CONTEXT_SCREENS, MAX_FIELD_SUGGESTIONS, MAX_LOOKUP_NAME_CHARS, MAX_SCREEN_BUTTONS,
-    MAX_SCREEN_FIELDS, MAX_SCREEN_MATCHES, is_restricted_model,
+    MAX_SCREEN_DETAILS, MAX_SCREEN_FIELDS, MAX_SCREEN_MATCHES, is_restricted_model,
 )
 from .providers import _vocabulary_pattern
 
@@ -159,7 +159,27 @@ def screens_named_in(env, text, models):
             if rank is not None:
                 named.append((rank, path, filters))
     named.sort(key=lambda item: item[0])
-    return [{"screen": path, "filters": filters} for _rank, path, filters in named[:MAX_SCREEN_MATCHES]]
+    return [{"screen": path, "filters": filters, **(_screen_fields(env[_screen_action(env, path).res_model])
+                                                    if index < MAX_SCREEN_DETAILS else {})}
+            for index, (_rank, path, filters) in enumerate(named[:MAX_SCREEN_MATCHES])]
+
+
+def _screen_action(env, path):
+    return next(action for screen, action in _window_screens(env) if screen == path)
+
+
+def _screen_fields(model):
+    """What a report on ``model`` can be grouped by and add up, by the labels its screens show, so a model picks
+    "Lost Reason" from a short list instead of writing a field name: linked records, choices and dates, and the
+    numbers Odoo can total. Credential fields are left out."""
+    fields = model.fields_get(attributes=["string", "type", "groupable", "aggregator", "store"])
+    usable = {name: field for name, field in fields.items() if field.get("store") and not CREDENTIAL_FIELD.search(name)}
+    return {
+        "group_by": sorted({field["string"] for field in usable.values() if field.get("groupable")
+                            and field["type"] in ("many2one", "selection", "boolean", "date", "datetime")}),
+        "measures": ["Count"] + sorted({field["string"] for name, field in usable.items() if name != "id"
+                                        and field["type"] in ("integer", "float", "monetary") and field.get("aggregator")}),
+    }
 
 
 def uninstalled_named_in(env, text):

@@ -110,6 +110,12 @@ def screen_choices(tools, screens):
                 properties["screen"] = dict(properties["screen"], enum=[screen["screen"] for screen in screens] + ["none"])
                 if labels:
                     properties["filters"] = dict(properties["filters"], items={"type": "string", "enum": labels})
+                # The report's grouping and measures, by the labels the screens show (field_named reads them back).
+                for key in ("group_by", "measures"):
+                    options = sorted({label for screen in screens for label in screen.get(key, [])})
+                    if key in properties and options:
+                        properties[key] = dict(properties[key], **({"enum": options} if key == "group_by" else {
+                            "items": {"type": "string", "enum": options}}))
                 schema = dict(schema, properties=properties)
             else:
                 properties.pop("screen")
@@ -118,6 +124,18 @@ def screen_choices(tools, screens):
             tool = dict(tool, inputSchema=schema)
         chosen.append(tool)
     return chosen
+
+
+def field_named(model, value):
+    """The field ``value`` names on ``model``: its name, or its one field with that label as the screens list it
+    ("Lost Reason"), keeping a ":avg" or ":month" part; "Count" is the count. Anything else is returned as given."""
+    if not isinstance(value, str) or value.partition(":")[0] in model._fields:
+        return value
+    if value.strip().casefold() == "count":
+        return "count"
+    label, sep, rest = value.partition(":")
+    named = [name for name, field in model._fields.items() if field.store and field.string.casefold() == label.strip().casefold()]
+    return named[0] + sep + rest if len(named) == 1 else value
 
 
 def apply_screen(env, arguments):
@@ -332,6 +350,11 @@ def execute_chart(env, arguments):
                    "screen", "filters"}
     }}
     arguments = apply_screen(env, arguments)
+    if arguments.get("model") in env:  # labels picked from the screens' lists, as field names
+        target = env[arguments["model"]]
+        arguments["group_by"] = field_named(target, arguments.get("group_by"))
+        if isinstance(arguments["measures"], list):
+            arguments["measures"] = [field_named(target, measure) for measure in arguments["measures"]]
     name, group, interval = arguments.get("model"), arguments.get("group_by"), arguments["interval"]
     measures, domain = arguments["measures"], clean_domain(arguments["domain"])
     chart, title, limit = arguments.get("chart_type"), arguments.get("title"), arguments.get("limit")

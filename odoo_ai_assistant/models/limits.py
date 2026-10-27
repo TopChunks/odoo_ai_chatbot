@@ -65,6 +65,8 @@ MAX_CHART_IMAGE_CHARS = 4_000_000
 MAX_LOOKUP_NAME_CHARS = 200
 MAX_CONTEXT_SCREENS = 600
 MAX_SCREEN_MATCHES = 8
+# Of those, how many list their groupings and number fields too (the best matches first).
+MAX_SCREEN_DETAILS = 3
 MAX_SCREEN_FIELDS = 80
 MAX_SCREEN_BUTTONS = 40
 
