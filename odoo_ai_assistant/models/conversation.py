@@ -662,11 +662,11 @@ class AIConversation(models.Model):
             # Still not read: Odoo answers itself, never the AI's unread claims about records or access. It
             # searches the screen the question names when the user may read it, or gives Odoo's own reason why not.
             screens = (context_options.get("screen_context") or {}).get("screens") or []
-            reasons = [menu["why_not"] for menu in self._menus_named().get("named_menus", []) if menu.get("why_not")]
+            named = self._menus_named().get("named_menus", [])[:1]  # the best match only, never another screen's
             if screens:
                 calls = [{"name": "mcp_search_records", "arguments": {"screen": screens[0]["screen"]}}]
-            elif reasons:
-                text = reasons[0]
+            elif named and named[0].get("why_not"):
+                text = named[0]["why_not"]
         try:
             title = self._topic_title(config)
         except UserError:

@@ -12,8 +12,9 @@ from odoo.exceptions import AccessError, ValidationError
 from odoo.tools.safe_eval import safe_eval
 
 from .limits import (
-    CLOSE_FIELD_NAME, CREDENTIAL_FIELD, MAX_CONTEXT_SCREENS, MIN_MISSPELT_WORD, MAX_FIELD_SUGGESTIONS, MAX_LOOKUP_NAME_CHARS, MAX_SCREEN_BUTTONS,
-    MAX_SCREEN_DETAILS, MAX_SCREEN_FIELDS, MAX_SCREEN_MATCHES, is_restricted_model,
+    CLOSE_FIELD_NAME, CREDENTIAL_FIELD, MAX_CONTEXT_SCREENS, MAX_FIELD_SUGGESTIONS, MAX_LOOKUP_NAME_CHARS,
+    MAX_SCREEN_BUTTONS, MAX_SCREEN_DETAILS, MAX_SCREEN_FIELDS, MAX_SCREEN_MATCHES, MIN_MISSPELT_WORD,
+    is_restricted_model,
 )
 from .providers import _vocabulary_pattern
 
@@ -94,28 +95,44 @@ def apps_named_in(env, text):
 def menus_named_in(env, text):
     """The accessible menus inside apps that ``text`` names, singular or plural, with their full path and the model
     of their records, so the AI knows where a named screen is and what it holds without searching every app's
-    menus. A word that names an app means the app (see apps_named_in), not a menu of the same name. Menus named by
-    a rarer word come first ("scrapped" names one menu, "products" many), then the longest, most specific names."""
+    menus. A word that names an app means the app (see apps_named_in), not a menu of the same name. Menus rank as
+    _name_rank does ("Warehouses" in "list our warehouses" before "Update Apps List"), then screens before menu
+    groups, then those named by a rarer word ("scrapped" names one menu, "products" many), then the shortest name."""
     apps = accessible_apps(env)
     app_names = {name.casefold() for name in apps}
     rows = {row["menu"]: row for app in apps for row in app_structure(env, {"app": app})["rows"]}
     named = [row for path, row in rows.items() if " / " in path
              and (name := path.rsplit(" / ", 1)[1]).casefold() not in app_names
              and ((pattern := _vocabulary_pattern([name])) and pattern.search(text) or _words(text) & _words(name))]
-    asked = _words(text)
-    matched = {row["menu"]: asked & _words(row["menu"].rsplit(" / ", 1)[1]) for row in named}
-    menus_with = {word: sum(word in words for words in matched.values()) for word in asked}
-    named.sort(key=lambda row: (min((menus_with[word] for word in matched[row["menu"]]), default=len(named)),
-                                -len(row["menu"].rsplit(" / ", 1)[1])))
+    rarity = _rarity(text, [row["menu"] for row in named])
+    named.sort(key=lambda row: (*_name_rank(text, row["menu"]), not row["model"], rarity[row["menu"]],
+                                len(row["menu"].rsplit(" / ", 1)[1])))
     return [{"path": row["menu"], **({"model": row["model"]} if row["model"] else {})}
             for row in named[:MAX_SCREEN_MATCHES]]
 
 
-def _words(text):
-    """The words of ``text`` of four letters or more, singular as a menu names them (opportunities: opportunity), with
-    the plain forms of "-ed" and "-ing" words too (scrapped: scrap, invoiced: invoice, shipping: ship)."""
+def _name_rank(text, path):
+    """How well ``text`` names the screen ``path``, best first: more of its words in the name, then the whole name
+    asked ("Purchase Orders" before "Orders", "Invoices" before "Orders to Invoice"). Short words count here
+    ("Fee Payments" before "Payments"), though alone they never make a screen named."""
+    asked, named = _words(text, 3), _words(path.rsplit(" / ", 1)[-1], 3)
+    return -len(asked & named), not (named and named <= asked)
+
+
+def _rarity(text, paths):
+    """For each of ``paths``, how many of them share its rarest word with ``text``: a word naming few screens
+    ("scrapped", "quotations") says more than one naming many ("products", "customer")."""
+    asked = _words(text)
+    shared = {path: asked & _words(path.rsplit(" / ", 1)[-1]) for path in paths}
+    count = {word: sum(word in words for words in shared.values()) for word in asked}
+    return {path: min((count[word] for word in words), default=len(paths)) for path, words in shared.items()}
+
+
+def _words(text, shortest=4):
+    """The words of ``text`` of ``shortest`` letters or more, singular as a menu names them (opportunities:
+    opportunity), with the plain forms of "-ed" and "-ing" words too (scrapped: scrap, invoiced: invoice)."""
     words = set()
-    for word in re.findall(r"[^\W\d_]{4,}", (text or "").casefold()):
+    for word in re.findall(r"[^\W\d_]{%d,}" % shortest, (text or "").casefold()):
         word = word[:-3] + "y" if word.endswith("ies") else word[:-1] if word.endswith("s") and not word.endswith("ss") else word
         words.add(word)
         for ending in ("ing", "ed"):
@@ -177,7 +194,9 @@ def screens_named_in(env, text, models):
                          if _shares_word(words, _words(names))), None)
             if rank is not None:
                 named.append((rank, path, filters, action.res_model))
-    named.sort(key=lambda item: item[0])
+    rarity = _rarity(text, [item[1] for item in named])
+    named.sort(key=lambda item: (*_name_rank(text, item[1]), rarity[item[1]], item[0],
+                                 len(item[1].rsplit(" / ", 1)[-1])))
     screens, detailed = [], set()
     for index, (_rank, path, filters, model_name) in enumerate(named[:MAX_SCREEN_MATCHES]):
         model = env[model_name]

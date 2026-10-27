@@ -116,22 +116,24 @@
                         </div>
                         <t t-foreach="state.messages" t-as="message" t-key="message.id">
                             <DateSection t-if="startsNewDay(message_index)" date="messageDay(message)" className="'o_ai_date_section pt-2 pb-3 px-2'"/>
-                            <div class="o_ai_message d-flex gap-2 mb-3" t-att-class="{'o_ai_user': message.role === 'user'}">
-                                <img t-if="message.role === 'assistant'" src="/odoo_ai_assistant/static/description/icon.svg" class="o_ai_message_avatar" alt="" width="32" height="32"/>
+                            <div class="o_ai_message d-flex gap-2" t-att-class="{'o_ai_user': message.role === 'user', 'mb-1': continuesAnswer(message_index + 1), 'mb-3': !continuesAnswer(message_index + 1)}">
+                                <img t-if="message.role === 'assistant'" src="/odoo_ai_assistant/static/description/icon.svg" class="o_ai_message_avatar" t-att-class="{'invisible': continuesAnswer(message_index)}" alt="" width="32" height="32"/>
                                 <span t-else="" class="o_ai_message_avatar o_ai_user_avatar" t-att-title="userName" aria-hidden="true" t-esc="userInitial"/>
                                 <div class="o_ai_message_content flex-grow-1">
                                     <t t-set="payload" t-value="messagePayload(message)"/>
                                     <t t-set="content" t-value="messageContent(message)"/>
                                     <t t-set="formatted" t-value="messageHTML(message)"/>
                                     <div class="o_ai_message_meta small text-muted mb-1">
+                                        <t t-if="!continuesAnswer(message_index)">
                                         <strong t-esc="message.role === 'user' ? userName : state.assistant_name"/>
                                         <time t-if="message.create_date" class="ms-1" t-att-datetime="message.create_date.replace(' ', 'T') + 'Z'" t-att-title="messageDateTitle(message)" t-esc="messageTime(message)"/>
+                                        </t>
                                         <span t-if="message.provider_sensitive || payload?.state === 'shared'" class="badge text-bg-warning ms-2">Shared with provider</span>
                                         <span t-elif="message.local_only || payload" class="badge text-bg-success ms-2"><i class="fa fa-lock me-1"/>Local only</span>
                                         <CopyButton t-if="message.role === 'assistant' and content" className="'btn-sm btn-link text-muted p-0 ms-1'"
                                                     content="content" icon="'fa-clone'" successText.translate="Copied"/>
                                     </div>
-                                    <details t-if="message.execution_steps?.length" class="small text-muted mb-2">
+                                    <details t-if="message.execution_steps?.length and !continuesAnswer(message_index + 1)" class="small text-muted mb-2">
                                         <summary>Steps taken</summary>
                                         <ol class="mt-1 mb-0"><li t-foreach="message.execution_steps" t-as="step" t-key="step_index" t-esc="step"/></ol>
                                     </details>

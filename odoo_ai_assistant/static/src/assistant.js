@@ -450,6 +450,13 @@ export class AssistantPanel extends Component {
         return day === DateTime.now().toLocaleString(DateTime.DATE_MED) ? _t("Today") : day;
     }
 
+    /** Whether message ``index`` goes on the AI's answer above (its table, then its explanation): shown as one answer. */
+    continuesAnswer(index) {
+        const messages = this.state.messages;
+        return index > 0 && index < messages.length && messages[index].role === "assistant" &&
+            messages[index - 1].role === "assistant" && !this.startsNewDay(index);
+    }
+
     startsNewDay(index) {
         const day = this.messageDay(this.state.messages[index]);
         return Boolean(day) && (index === 0 || this.messageDay(this.state.messages[index - 1]) !== day);
