@@ -140,17 +140,37 @@ def field_named(model, value):
 
 def apply_screen(env, arguments):
     """``arguments`` of the search or report tool with their screen and filters made its model and Odoo's own
-    conditions (navigation.screen_search), and the AI's own conditions checked (check_values) and added."""
+    conditions (navigation.screen_search), and the AI's own conditions checked (check_values, unrecorded_dates) and
+    added. Returns the arguments and a note for the user ("" when none)."""
     screen, filters = arguments.pop("screen", None), arguments.pop("filters", None) or []
-    if arguments.get("model") in env and not (screen and screen != "none"):
-        check_values(env[arguments["model"]], clean_domain(arguments.get("domain") or []))
+    base, extra = [], clean_domain(arguments.get("domain") or [])
     if screen and screen != "none":
-        extra = clean_domain(arguments.get("domain") or [])
-        arguments["model"], arguments["domain"] = screen_search(env, screen, filters)
-        if isinstance(extra, list):
-            check_values(env[arguments["model"]], extra)
-            arguments["domain"] += extra
-    return arguments
+        arguments["model"], base = screen_search(env, screen, filters)
+    if arguments.get("model") not in env or not isinstance(extra, list):
+        return arguments, ""
+    model = env[arguments["model"]]
+    check_values(model, extra)
+    extra, note = unrecorded_dates(model, base, extra)
+    arguments["domain"] = base + extra
+    return arguments, note
+
+
+def unrecorded_dates(model, base, extra):
+    """``extra`` without its date conditions when only they make the search find nothing because none of the
+    records otherwise found has that date at all (Odoo records no date when an opportunity is lost), with a note
+    saying so, so those records are shown instead of nothing. Otherwise ``extra`` as given and no note."""
+    dated = [term for term in extra if isinstance(term, list) and len(term) == 3 and isinstance(term[0], str)
+             and getattr(model._fields.get(term[0]), "type", None) in ("date", "datetime")]
+    rest = base + [term for term in extra if term not in dated]
+    names = sorted({term[0] for term in dated})
+    model = model.with_context(active_test=False)  # archived ones count, as with_archived then shows them
+    with contextlib.suppress(ValueError, TypeError, UserError):  # a domain Odoo refuses is left for it to report
+        if (dated and not model.search_count(base + extra, limit=1) and model.search_count(rest, limit=1)
+                and not any(model.search_count(rest + [[name, "!=", False]], limit=1) for name in names)):
+            return [term for term in extra if term not in dated], _(
+                "Odoo does not record %s for these records, so the period could not be applied: all of them are "
+                "shown.") % ", ".join(model._fields[name]._description_string(model.env) for name in names)
+    return extra, ""
 
 
 def check_values(model, domain):
@@ -349,7 +369,7 @@ def execute_chart(env, arguments):
         if key in {"model", "group_by", "interval", "measures", "domain", "chart_type", "limit", "title", "smallest",
                    "screen", "filters"}
     }}
-    arguments = apply_screen(env, arguments)
+    arguments, date_note = apply_screen(env, arguments)
     if arguments.get("model") in env:  # labels picked from the screens' lists, as field names
         target = env[arguments["model"]]
         arguments["group_by"] = field_named(target, arguments.get("group_by"))
@@ -466,7 +486,7 @@ def execute_chart(env, arguments):
             {"key": f"m{index}", "label": label} for index, label in enumerate(labels)],
             "rows": [{"label": label, **{f"m{index}": value for index, value in enumerate(shown(values))}}
                      for label, values in rows],
-            "truncated": result["truncated"], "note": note, "answer": answer, "basis": basis}
+            "truncated": result["truncated"], "note": " ".join(filter(None, [date_note, note])), "answer": answer, "basis": basis}
     values = [values[0] for _label, values in rows]
     # A total that cannot be matched to the rows shown (top 3 by order count, no "Others") is left out.
     total = None if specs[0].endswith(":avg") or not additive and len(rows) < len(result["rows"]) else totals[0]
@@ -474,7 +494,7 @@ def execute_chart(env, arguments):
             "operation": "avg" if specs[0].endswith(":avg") else "sum" if specs[0].endswith(":sum") else "count",
             "values": values, "shown": [shown([value])[0] for value in values], "value_label": labels[0],
             "group_label": definitions[group]["string"],
-            "truncated": result["truncated"], "note": note, "answer": answer, "basis": basis,
+            "truncated": result["truncated"], "note": " ".join(filter(None, [date_note, note])), "answer": answer, "basis": basis,
             # Bottom N: "Others" is far larger than them, so it stays in the table and total but is not drawn.
             "bars": limit if smallest and limit and len(values) > limit else None,
             # Shown under the chart: the AI never sees these values, so it cannot state the total itself.

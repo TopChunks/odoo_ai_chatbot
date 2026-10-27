@@ -1268,7 +1268,7 @@ class NativeToolRequest(models.Model):
                 ):
                     arguments[key] = [item["name"] for item in value]
         if tool == "mcp_search_records":
-            arguments = apply_screen(conversation.env, arguments)
+            arguments = apply_screen(conversation.env, arguments)[0]
         bridge = conversation.env["odoo.ai.assistant.native.mcp"]
         plan = arguments
         arguments, dependencies = bridge._resolve_plan(tool, plan)
