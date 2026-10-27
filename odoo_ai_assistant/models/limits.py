@@ -57,6 +57,10 @@ MAX_CHART_TITLE_CHARS = 120
 MAX_REPORT_MEASURES = 4
 # Groups named in a chart or summary answer when several share the highest or lowest value.
 MAX_TIED_NAMES = 3
+# How many more tries the AI gets after Odoo refuses its request with the reason (a wrong field or value).
+MAX_TOOL_RETRIES = 2
+# Shorter words are matched exactly only: a short one is close to too many others (lose, close).
+MIN_MISSPELT_WORD = 6
 # How alike a written name and a real one must be to be read as it (0 to 1): an AI's field name, a misspelt word.
 CLOSE_FIELD_NAME = 0.85
 MAX_CHART_IMAGE_CHARS = 4_000_000

@@ -4,7 +4,10 @@ import difflib
 import json
 import math
 import re
-from datetime import date, datetime
+from datetime import date, datetime, time
+
+import pytz
+from dateutil.relativedelta import relativedelta
 
 from odoo import _, fields, release
 from lxml import etree
@@ -88,11 +91,55 @@ def requested_chart_tool(tools):
 
 
 # A screen and its filters, as Odoo's own screens search (navigation.screen_search), for the search and report tools.
+# Periods the AI names and Odoo dates, as its own date filters do: (unit, how many units back), "days" counting back
+# from today included.
+PERIODS = {
+    "today": ("day", 0), "yesterday": ("day", 1), "this_week": ("week", 0), "last_week": ("week", 1),
+    "this_month": ("month", 0), "last_month": ("month", 1), "this_quarter": ("quarter", 0),
+    "last_quarter": ("quarter", 1), "this_year": ("year", 0), "last_year": ("year", 1),
+    "last_7_days": ("days", 7), "last_30_days": ("days", 30),
+}
+
+
+def period_domain(model, field_name, period):
+    """The conditions putting ``field_name`` of ``model`` in ``period`` (PERIODS), from the user's today and in their
+    time zone, weeks starting on their language's first day: a model never works out "this quarter" itself."""
+    field = model._fields.get(field_name)
+    if period not in PERIODS or getattr(field, "type", None) not in ("date", "datetime"):
+        dates = sorted({item.string for item in model._fields.values() if item.type in ("date", "datetime") and item.store})
+        raise ValidationError(_("A period needs one of %(periods)s on a date field: %(fields)s.") % {
+            "periods": ", ".join(PERIODS), "fields": ", ".join(dates)})
+    unit, back = PERIODS[period]
+    today = fields.Date.context_today(model.env.user)
+    if unit == "days":
+        start, end = today - relativedelta(days=back - 1), today + relativedelta(days=1)
+    elif unit == "day":
+        start = today - relativedelta(days=back)
+        end = start + relativedelta(days=1)
+    elif unit == "week":
+        first = int(get_lang(model.env).week_start)  # 1 Monday ... 7 Sunday
+        start = today - relativedelta(days=(today.isoweekday() - first) % 7 + 7 * back)
+        end = start + relativedelta(weeks=1)
+    else:
+        months = {"month": 1, "quarter": 3, "year": 12}[unit]
+        first = today.replace(day=1, month=(today.month - 1) // months * months + 1)
+        start = first - relativedelta(months=months * back)
+        end = start + relativedelta(months=months)
+    if field.type == "datetime":  # the user's midnights, in the UTC Odoo stores
+        zone = pytz.timezone(model.env.user.tz or "UTC")
+        start, end = (fields.Datetime.to_string(zone.localize(datetime.combine(day, time.min)).astimezone(pytz.utc)
+                                                .replace(tzinfo=None)) for day in (start, end))
+    return [[field_name, ">=", str(start)], [field_name, "<", str(end)]]
+
+
 SCREEN_PROPERTIES = {
     "screen": {"type": "string", "description": "A screen from screens (its full menu path): search as that Odoo "
                                                 "screen does, its model and own conditions included"},
     "filters": {"type": "array", "items": {"type": "string"},
                 "description": "Names of that screen's filters to apply, as screens lists them"},
+    "period": {"type": "string", "enum": [*PERIODS],
+               "description": "A period for period_field; Odoo works out its dates. Use it instead of writing dates"},
+    "period_field": {"type": "string", "description": "The date field the period applies to (its label or name)"},
 }
 
 
@@ -143,15 +190,21 @@ def apply_screen(env, arguments):
     conditions (navigation.screen_search), and the AI's own conditions checked (check_values, unrecorded_dates) and
     added. Returns the arguments and a note for the user ("" when none)."""
     screen, filters = arguments.pop("screen", None), arguments.pop("filters", None) or []
+    period, period_field = arguments.pop("period", None), arguments.pop("period_field", None)
     base, extra = [], clean_domain(arguments.get("domain") or [])
     if screen and screen != "none":
         arguments["model"], base = screen_search(env, screen, filters)
     if arguments.get("model") not in env or not isinstance(extra, list):
         return arguments, ""
     model = env[arguments["model"]]
+    given = extra
+    extra = [listed_emptiness(model, term) for term in extra]
     check_values(model, extra)
+    if period:
+        extra = extra + period_domain(model, field_named(model, period_field or ""), period)
     extra, note = unrecorded_dates(model, base, extra)
-    arguments["domain"] = base + extra
+    if base or extra != given:  # else left as written: an earlier result's reference ($result) is filled in later
+        arguments["domain"] = base + extra
     return arguments, note
 
 
@@ -171,6 +224,17 @@ def unrecorded_dates(model, base, extra):
                 "Odoo does not record %s for these records, so the period could not be applied: all of them are "
                 "shown.") % ", ".join(model._fields[name]._description_string(model.env) for name in names)
     return extra, ""
+
+
+def listed_emptiness(model, term):
+    """``term`` asking whether a value taken from a list of linked records is empty (Latest Login, from the login
+    history) asked of that list itself, as Odoo cannot search such a value for emptiness: "never logged in" is no
+    login history. Any other term is returned as given."""
+    field = model._fields.get(term[0]) if isinstance(term, list) and len(term) == 3 and isinstance(term[0], str) else None
+    if field is None or field.store or not field.related or term[1] not in ("=", "!=") or term[2] not in (False, None):
+        return term
+    first = model._fields.get(field.related.split(".")[0])
+    return [first.name, term[1], False] if first is not None and first.type in ("one2many", "many2many") else term
 
 
 def check_values(model, domain):
@@ -193,6 +257,16 @@ def check_values(model, domain):
                 raise ValidationError(_("%(field)s has no value %(wrong)s. Its values: %(values)s.") % {
                     "field": term[0], "wrong": ", ".join(wrong),
                     "values": ", ".join("%s (%s)" % item for item in options.items())})
+        elif len(path) == 1 and term[0] == model._rec_name and field.type == "char" and term[1] == "=":
+            # A reference that is not the record's own name, as a sales order's on its delivery: say which field has it.
+            if not model.search_count([(term[0], "in", values)], limit=1):
+                others = [name for name, other in model._fields.items() if other.type == "char" and other.store
+                          and name != term[0] and not CREDENTIAL_FIELD.search(name)]
+                holding = [name for name in others if model.search_count([(name, "in", values)], limit=1)]
+                if holding:
+                    raise ValidationError(_("No %(kind)s has %(field)s %(value)s; %(holding)s has it: search on that.") % {
+                        "kind": model._description, "field": term[0], "value": ", ".join(values),
+                        "holding": ", ".join("%s (%s)" % (model._fields[name].string, name) for name in holding)})
         elif field.type == "many2one" and path[1:] in ([], ["name"], ["display_name"]):
             linked = model.env[field.comodel_name]
             with contextlib.suppress(AccessError):  # a kind of record the user cannot read is left to the tool
@@ -367,7 +441,7 @@ def execute_chart(env, arguments):
     arguments = {"interval": "month", "domain": [], "measures": ["count"], **{
         key: value for key, value in arguments.items()
         if key in {"model", "group_by", "interval", "measures", "domain", "chart_type", "limit", "title", "smallest",
-                   "screen", "filters"}
+                   "screen", "filters", "period", "period_field"}
     }}
     arguments, date_note = apply_screen(env, arguments)
     if arguments.get("model") in env:  # labels picked from the screens' lists, as field names
@@ -465,12 +539,15 @@ def execute_chart(env, arguments):
     def shown(values):
         return [cell_value(model, field, value) for field, value in zip(fields_used, values)]
 
-    # From every group, before a limit keeps some: groups that share the asked-for value are all named.
-    answer = summary_answer(labels[0], [(label, shown(values)[0], values[0]) for label, values in rows],
-                            not result["truncated"], smallest if limit else None)
     totals = [0 if value is None or value is False else value for value in result["totals"]]
     # Averages and counts of distinct documents do not add up across groups.
     additive = all(spec == "__count" or spec.endswith(":sum") for spec in specs)
+    # From every group, before a limit keeps some: groups that share the asked-for value are all named, with their
+    # share of the total where the groups add up to it ("Won 5, 62%": a win rate needs no sum by the AI).
+    answer = summary_answer(labels[0], [(label, shown(values)[0], values[0]) for label, values in rows],
+                            not result["truncated"], smallest if limit else None,
+                            total=(totals[0], shown([totals[0]])[0]) if additive and not result["truncated"]
+                            and all(values[0] >= 0 for _label, values in rows) else None)  # shares of positives only
     if limit:
         rows.sort(key=lambda row: row[1][0], reverse=not smallest)
         while limit < len(rows) and rows[limit][1][0] == rows[limit - 1][1][0]:  # ties at the cut stay, as Power BI's TOPN
@@ -652,10 +729,11 @@ def based_on(model, domain, order="", what=""):
     return _("Based on: %s", " · ".join(parts + ([what] if what else [])))
 
 
-def summary_answer(measure, rows, complete=True, smallest=None):
+def summary_answer(measure, rows, complete=True, smallest=None, total=None):
     """A plain first answer from summary rows (name, value shown, value), all of the groups when ``complete``: the
     one value, the highest and lowest, or only the end ``smallest`` asks for (True: lowest). Groups sharing that
-    value are all named. None when part of the groups cannot tell."""
+    value are all named. With ``total`` (value, value shown) of groups that add up, each named value gets its share
+    and the total is stated. None when part of the groups cannot tell."""
     if not rows:
         return _("No matching records found.")
     if len(rows) == 1:
@@ -669,17 +747,19 @@ def summary_answer(measure, rows, complete=True, smallest=None):
         names = [row[0] for row in tied[:MAX_TIED_NAMES]] + (
             [_("%s more", len(tied) - MAX_TIED_NAMES)] if len(tied) > MAX_TIED_NAMES else [])
         names = _("%(first)s and %(last)s", first=", ".join(names[:-1]), last=names[-1]) if len(names) > 1 else names[0]
-        return names, tied[0][1] if len(tied) == 1 else _("%s each", tied[0][1])
+        share = _(", %s%%", round(100 * tied[0][2] / total[0])) if total and total[0] else ""
+        return names, "%s%s" % (tied[0][1] if len(tied) == 1 else _("%s each", tied[0][1]), share)
 
+    stated = " " + _("Total: %s.", total[1]) if total else ""
     if smallest is None:
         (high, high_value), (low, low_value) = end(max), end(min)
         if high == low:  # every group has the same value
-            return _("%(measure)s: %(names)s (%(value)s).", measure=measure, names=high, value=high_value)
+            return _("%(measure)s: %(names)s (%(value)s).", measure=measure, names=high, value=high_value) + stated
         return _("Highest %(measure)s: %(high)s (%(high_value)s). Lowest: %(low)s (%(low_value)s).",
-                 measure=measure, high=high, high_value=high_value, low=low, low_value=low_value)
+                 measure=measure, high=high, high_value=high_value, low=low, low_value=low_value) + stated
     name, value = end(min if smallest else max)
     return (_("Lowest %(measure)s: %(name)s (%(value)s).", measure=measure, name=name, value=value) if smallest
-            else _("Highest %(measure)s: %(name)s (%(value)s).", measure=measure, name=name, value=value))
+            else _("Highest %(measure)s: %(name)s (%(value)s).", measure=measure, name=name, value=value)) + stated
 
 
 def cell_value(model, name, value, row=None):

@@ -12,7 +12,7 @@ from odoo.exceptions import AccessError, ValidationError
 from odoo.tools.safe_eval import safe_eval
 
 from .limits import (
-    CLOSE_FIELD_NAME, CREDENTIAL_FIELD, MAX_CONTEXT_SCREENS, MAX_FIELD_SUGGESTIONS, MAX_LOOKUP_NAME_CHARS, MAX_SCREEN_BUTTONS,
+    CLOSE_FIELD_NAME, CREDENTIAL_FIELD, MAX_CONTEXT_SCREENS, MIN_MISSPELT_WORD, MAX_FIELD_SUGGESTIONS, MAX_LOOKUP_NAME_CHARS, MAX_SCREEN_BUTTONS,
     MAX_SCREEN_DETAILS, MAX_SCREEN_FIELDS, MAX_SCREEN_MATCHES, is_restricted_model,
 )
 from .providers import _vocabulary_pattern
@@ -94,29 +94,41 @@ def apps_named_in(env, text):
 def menus_named_in(env, text):
     """The accessible menus inside apps that ``text`` names, singular or plural, with their full path and the model
     of their records, so the AI knows where a named screen is and what it holds without searching every app's
-    menus. A word that names an app means the app (see apps_named_in), not a menu of the same name; the longest,
-    most specific names come first."""
+    menus. A word that names an app means the app (see apps_named_in), not a menu of the same name. Menus named by
+    a rarer word come first ("scrapped" names one menu, "products" many), then the longest, most specific names."""
     apps = accessible_apps(env)
     app_names = {name.casefold() for name in apps}
     rows = {row["menu"]: row for app in apps for row in app_structure(env, {"app": app})["rows"]}
     named = [row for path, row in rows.items() if " / " in path
              and (name := path.rsplit(" / ", 1)[1]).casefold() not in app_names
-             and (pattern := _vocabulary_pattern([name])) and pattern.search(text)]
-    named.sort(key=lambda row: -len(row["menu"].rsplit(" / ", 1)[1]))
+             and ((pattern := _vocabulary_pattern([name])) and pattern.search(text) or _words(text) & _words(name))]
+    asked = _words(text)
+    matched = {row["menu"]: asked & _words(row["menu"].rsplit(" / ", 1)[1]) for row in named}
+    menus_with = {word: sum(word in words for words in matched.values()) for word in asked}
+    named.sort(key=lambda row: (min((menus_with[word] for word in matched[row["menu"]]), default=len(named)),
+                                -len(row["menu"].rsplit(" / ", 1)[1])))
     return [{"path": row["menu"], **({"model": row["model"]} if row["model"] else {})}
             for row in named[:MAX_SCREEN_MATCHES]]
 
 
 def _words(text):
-    """The words of ``text`` of four letters or more, singular as a menu names them (opportunities: opportunity)."""
-    return {word[:-3] + "y" if word.endswith("ies") else word[:-1] if word.endswith("s") and not word.endswith("ss")
-            else word for word in re.findall(r"[^\W\d_]{4,}", (text or "").casefold())}
+    """The words of ``text`` of four letters or more, singular as a menu names them (opportunities: opportunity), with
+    the plain forms of "-ed" and "-ing" words too (scrapped: scrap, invoiced: invoice, shipping: ship)."""
+    words = set()
+    for word in re.findall(r"[^\W\d_]{4,}", (text or "").casefold()):
+        word = word[:-3] + "y" if word.endswith("ies") else word[:-1] if word.endswith("s") and not word.endswith("ss") else word
+        words.add(word)
+        for ending in ("ing", "ed"):
+            root = word[:-len(ending)]
+            if word.endswith(ending) and len(root) >= 3:
+                words |= {root, root + "e", root[:-1] if root[-1] == root[-2] else root}
+    return words
 
 
 def _shares_word(words, others):
     """Whether ``words`` and ``others`` share a word, a misspelt one too ("oppurtunities": opportunity)."""
     return bool(words & others) or any(difflib.get_close_matches(word, others, n=1, cutoff=CLOSE_FIELD_NAME)
-                                       for word in words)
+                                       for word in words if len(word) >= MIN_MISSPELT_WORD)
 
 
 def _window_screens(env):

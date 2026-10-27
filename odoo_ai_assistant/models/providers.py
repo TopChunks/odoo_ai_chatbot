@@ -91,6 +91,16 @@ GREETING_INSTRUCTIONS = (
     "actions. Assist exclusively with Odoo; refuse unrelated or mixed-topic requests."
 )
 
+# Instructions for checking a data answer against the question: models check what was done better than they choose
+# it, so a wrong measure, missing condition or wrong kind of record is caught and redone once.
+RESULT_CHECK_INSTRUCTIONS = (
+    "You check an Odoo answer. You get the user's question (with the earlier one when it is a follow-up) and what "
+    "Odoo did for it: each 'Based on' line names the records, the conditions, the grouping and what was counted or "
+    "added up. Reply YES when that answers the question. Otherwise reply NO: and one sentence naming what is wrong "
+    "or missing, such as the measure (a count where a quantity, amount or value was asked), a condition the question "
+    "asks for, the grouping, or the kind of record. An empty result of the right search is YES."
+)
+
 # Reply for requests outside Odoo; used in the system prompt and stored as the chat answer.
 _lt = LazyTranslate(__name__)
 SCOPE_REFUSAL = _lt("I can only assist with Odoo and the data available to you in Odoo.")
@@ -119,6 +129,9 @@ _OPENAI_CHAT_COMPLETIONS = set()
 # are learned per model, never hardcoded; a model that rejects every level is asked without one.
 _REASONING_EFFORTS = ("minimal", "low")
 _REASONING_STEP = {}  # (provider, model) -> index in _REASONING_EFFORTS of the level to ask for
+# Models asked at temperature 0, so the same question gets the same tool choice each time instead of a new guess;
+# those that reject a temperature (reasoning models) are learned here and asked without one, never hardcoded.
+_NO_TEMPERATURE = set()  # (provider, model)
 # Screen-context parts that are the same on every request for a user. They stay in the instructions, which
 # providers cache; everything else (date, current screen, schemas, screen details) is sent per request.
 _STABLE_CONTEXT_KEYS = ("running_version", "menus", "total_screens", "truncated", "ai_settings")
@@ -141,6 +154,10 @@ class ProviderClient:
         self.observer = observer
         self.max_output_tokens = max_output_tokens
         self.timeout = timeout
+
+    def _temperature(self, model):
+        """{"temperature": 0} for ``model``, or {} once it rejected one."""
+        return {} if (self.provider, model) in _NO_TEMPERATURE else {"temperature": 0}
 
     def _effort(self, model):
         """The reasoning level to ask `model` for, or None once it has rejected them all."""
@@ -227,6 +244,8 @@ class ProviderClient:
         error = body.get("error") if isinstance(body, dict) else None
         message = str(error.get("message", "")) if isinstance(error, dict) else ""
         text = (message + " " + (code or "")).lower()
+        if status == 400 and "temperature" in text:
+            return "temperature"  # the model takes no temperature (see _NO_TEMPERATURE)
         if status == 400 and re.search(r"thinking|reasoning", text):
             return "reasoning"  # the model rejects this reasoning level (see _REASONING_EFFORTS)
         if code == "context_length_exceeded" or status == 413 or re.search(
@@ -670,6 +689,9 @@ class ProviderClient:
                     notes = {index for index, entry in enumerate(history) if entry["content"].startswith(SYSTEM_NOTE)}
                     history = [entry for index, entry in enumerate(history) if not {index, index + 1} & notes]
                     continue
+                if error.kind == "temperature" and key not in _NO_TEMPERATURE:
+                    _NO_TEMPERATURE.add(key)
+                    continue
                 if error.kind == "reasoning" and self._effort(model):
                     _REASONING_STEP[key] = _REASONING_STEP.get(key, 0) + 1
                     continue
@@ -775,6 +797,7 @@ class ProviderClient:
             "model": model, "messages": [{"role": "system", "content": system}] + history,
             # OpenAI replaced max_tokens with max_completion_tokens; OpenRouter keeps max_tokens.
             "max_completion_tokens" if self.provider == "openai" else "max_tokens": self.max_output_tokens,
+            **self._temperature(model),
         }
         if self.provider == "openrouter":
             payload["usage"] = {"include": True}  # OpenRouter then reports the request's exact cost
@@ -816,7 +839,7 @@ class ProviderClient:
         """OpenAI Responses API, with an optional strict JSON schema for classifier answers."""
         payload = {
             "model": model, "instructions": system, "input": history,
-            "store": False, "max_output_tokens": self.max_output_tokens,
+            "store": False, "max_output_tokens": self.max_output_tokens, **self._temperature(model),
         }
         if effort := self._effort(model):
             payload["reasoning"] = {"effort": effort}
@@ -1013,8 +1036,9 @@ class ProviderClient:
                 system += ("screens are Odoo screens the request may mean, each with its own filters. When one fits, "
                            "search or report with its screen and filters as listed instead of writing those "
                            "conditions: Odoo applies them as its screen does (archived and lost records, statuses, "
-                           "document types); add in domain only what no filter covers, such as dates or names, "
-                           "with the fields listed in conditions and their values as listed. For a "
+                           "document types); add in domain only what no filter covers, such as names, with the fields "
+                           "listed in conditions and their values as listed. For today, this or last week, month, "
+                           "quarter or year, set period and period_field instead of writing dates. For a "
                            "report, group by and measure with the labels a screen lists, choosing the one that answers "
                            "the question (a reason for why, a stage, a person, a date). If no "
                            "screen or model holds the kind of record asked, say this Odoo has none; never show "
@@ -1077,7 +1101,7 @@ class ProviderClient:
             # Newer Claude models reject forced tool_choice ("tool"/"any") with HTTP 400.
             claude_tools, system = self._instructed_tool_choice(tools, system, tool_choice)
             payload = {
-                "model": model, "max_tokens": self.max_output_tokens,
+                "model": model, "max_tokens": self.max_output_tokens, **self._temperature(model),
                 # Claude caches only on request: the tools and these instructions are the same on every request,
                 # so repeats are billed at the cached rate (OpenAI and Gemini cache them without asking).
                 "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
@@ -1104,8 +1128,10 @@ class ProviderClient:
                 "systemInstruction": {"parts": [{"text": system}]},
                 "contents": [{"role": "model" if m["role"] == "assistant" else "user",
                               "parts": [{"text": m["content"]}]} for m in history],
+                # Gemini's thinking models keep their default temperature, as Google advises.
                 "generationConfig": {"maxOutputTokens": self.max_output_tokens, **(
-                    {"thinkingConfig": {"thinkingLevel": effort}} if (effort := self._effort(model)) else {})},
+                    {"thinkingConfig": {"thinkingLevel": effort}} if (effort := self._effort(model))
+                    else self._temperature(model))},
             }
             if gemini_tools:
                 payload["tools"] = [{"functionDeclarations": [

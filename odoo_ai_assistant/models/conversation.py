@@ -15,7 +15,8 @@ from odoo.tools.image import image_process
 from odoo.tools.mimetypes import guess_mimetype
 
 from .providers import (
-    GREETING_INSTRUCTIONS, SCOPE_REFUSAL, SYSTEM_NOTE, ProviderClient, ProviderError, latest_user_index,
+    GREETING_INSTRUCTIONS, RESULT_CHECK_INSTRUCTIONS, SCOPE_REFUSAL, SYSTEM_NOTE, ProviderClient, ProviderError,
+    latest_user_index,
 )
 from .formatting import format_reply
 from . import chart_export
@@ -29,7 +30,7 @@ from .limits import (
     MAX_FIELD_HINT_NAMES, MAX_FILE_NAME_CHARS, MAX_HISTORY_CHARS, MAX_HISTORY_MESSAGES, MAX_LISTED_CONVERSATIONS,
     MAX_IMAGE_CHARS, MAX_LOADED_MESSAGES, MAX_MESSAGE_CHARS, MAX_SCHEMA_ERROR_CHARS, MAX_SHARED_EVIDENCE_CHARS,
     MAX_MIMETYPE_CHARS, MAX_TITLE_CHARS, MAX_TITLE_PROMPTS,
-    MAX_TOOL_CALLS,
+    MAX_TOOL_CALLS, MAX_TOOL_RETRIES,
     WELCOME_SUGGESTIONS, is_restricted_model,
 )
 from .navigation import (
@@ -811,31 +812,60 @@ class AIConversation(models.Model):
         """Run the provider's tool calls. If Odoo refuses or rejects a call, tell the provider once
         so it can choose another tool; if that also fails, answer with the reason instead of an error.
         ``shared`` is the result the user agreed to share, when continuing from it (native tools only)."""
+        since = self.env["odoo.ai.assistant.message"].search([("conversation_id", "=", self.id)], order="id desc", limit=1).id
         reason = self._try_dispatch(client, config, history, calls, steps, action_request, shared)
         if reason is None:
-            return
-        # The reason is for the AI (field names, filters); the user sees plain words, the server log the reason.
-        _logger.info("AI conversation %s: first try refused (%s): %s", self.id,
-                     ", ".join(call["name"] for call in calls), reason[:MAX_SCHEMA_ERROR_CHARS])
+            # A data answer is checked against the question once; one that does not answer it is redone.
+            reason = not (action_request or shared) and self._result_mismatch(client, config, history, since)
+            if not reason:
+                return
+            self.env["odoo.ai.assistant.message"].sudo().search(
+                [("conversation_id", "=", self.id), ("id", ">", since)]).unlink()
+        # The reasons are for the AI (field names, filters, real values), each try told all of them so it does not
+        # repeat one; the user sees plain words, the server log the reasons.
         self._add_step(steps, _("Correcting the request"))
-        latest = history[-1]
-        retry_history = history[:-1] + [dict(latest, content=latest["content"] + (
-            "\n\n[Odoo note: the tool call you chose could not run: %s.%s Choose a different available tool "
-            "that fits, or answer without tools. Do not repeat the same call. If you explain the reason, keep "
-            "Odoo's menu paths and names exactly as written.]" % (reason, self._field_hint(reason))
-        ))]
-        text, retry_calls = client.reply(self._model(config).identifier, retry_history, tools, **options)
-        if retry_calls:
-            reason = self._try_dispatch(client, config, retry_history, retry_calls, steps, action_request, shared)
+        latest, reasons = history[-1], []
+        for attempt in range(1, MAX_TOOL_RETRIES + 1):
+            _logger.info("AI conversation %s: try refused (%s of %s, %s): %s", self.id, attempt, MAX_TOOL_RETRIES + 1,
+                         ", ".join(call["name"] for call in calls), reason[:MAX_SCHEMA_ERROR_CHARS])
+            reasons.append(reason + self._field_hint(reason))
+            retry_history = history[:-1] + [dict(latest, content=latest["content"] + (
+                "\n\n[Odoo note: the tool calls you chose could not run: %s. Choose a different available tool "
+                "that fits, or answer without tools. Do not repeat a call. If you explain the reason, keep "
+                "Odoo's menu paths and names exactly as written.]" % "; then: ".join(reasons)
+            ))]
+            text, calls = client.reply(self._model(config).identifier, retry_history, tools, **options)
+            if not calls:
+                if text.strip():
+                    self._store_answer(text, execution_steps=steps, payload=self._named_apps(),
+                                       provider_sensitive=bool(shared))
+                    return
+                break
+            reason = self._try_dispatch(client, config, retry_history, calls, steps, action_request, shared)
             if reason is None:
                 return
-            _logger.info("AI conversation %s: second try refused (%s): %s", self.id,
-                         ", ".join(call["name"] for call in retry_calls), reason[:MAX_SCHEMA_ERROR_CHARS])
-        elif text.strip():
-            self._store_answer(text, execution_steps=steps, payload=self._named_apps(), provider_sensitive=bool(shared))
-            return
+        else:
+            _logger.info("AI conversation %s: last try refused (%s): %s", self.id,
+                         ", ".join(call["name"] for call in calls), reason[:MAX_SCHEMA_ERROR_CHARS])
         self._store_answer(_("I couldn't complete this request in Odoo. Please ask it another way, for example with "
                              "the exact names, dates or filters you want."), local_only=True, execution_steps=steps)
+
+    def _result_mismatch(self, client, config, history, since):
+        """Why the data answers stored after message ``since`` do not answer the question, judged by the AI from
+        what they were based on (never their records); "" when they do, or when nothing can be checked."""
+        bases = [message.payload["basis"] for message in self.env["odoo.ai.assistant.message"].sudo().search(
+            [("conversation_id", "=", self.id), ("id", ">", since)]) if (message.payload or {}).get("basis")]
+        if not bases:
+            return ""
+        questions = [entry["content"] for entry in history if entry["role"] == "user"][-2:]
+        verdict, _calls = client.reply(self._model(config).identifier, [{"role": "user", "content": json.dumps(
+            {"question": questions[-1], "earlier_question": questions[:-1], "odoo_did": bases}, ensure_ascii=False)}],
+            [], system_override=RESULT_CHECK_INSTRUCTIONS)
+        verdict = verdict.strip()
+        if not verdict.upper().startswith("NO"):
+            return ""
+        _logger.info("AI conversation %s: answer redone after the check: %s", self.id, verdict[:MAX_SCHEMA_ERROR_CHARS])
+        return _("its result does not answer the question (%s)") % verdict[:MAX_SCHEMA_ERROR_CHARS]
 
     def _dispatch_calls(self, client, config, history, calls, steps, shared=None, discovery_depth=0,
                         action_request=False):
@@ -854,7 +884,10 @@ class AIConversation(models.Model):
             reads, refused = [0] * len(calls), []
             for index, call in enumerate(calls):
                 if not isinstance(call.get("name"), str) or call["name"] not in {tool["name"] for tool in tools}:
-                    raise AccessError(_("The provider requested a tool unavailable to your user."))
+                    # The available names, so a model that invented one picks a real tool on its next try.
+                    raise AccessError(_("The provider requested a tool unavailable to your user: %(name)s. Available "
+                                        "tools: %(tools)s.") % {"name": call.get("name"),
+                                                                 "tools": ", ".join(tool["name"] for tool in tools)})
                 arguments = parse_tool_arguments(call["arguments"])
                 if call["name"].startswith(NATIVE_TOOL_PREFIX):
                     progress(_("Preparing confirmed MCP action") if self.env[
