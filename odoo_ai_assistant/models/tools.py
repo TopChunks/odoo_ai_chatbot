@@ -96,6 +96,87 @@ SCREEN_PROPERTIES = {
 }
 
 
+def screen_choices(tools, screens):
+    """``tools`` with the screens offered for this question as the only screen and filter values ("none" when none
+    fits), so a model picks a screen as listed instead of writing its conditions. Without screens the choice is left
+    out."""
+    chosen = []
+    for tool in tools:
+        schema = tool.get("inputSchema") or {}
+        properties = dict(schema.get("properties") or {})
+        if {"screen", "filters"} <= set(properties):  # the search and report tools (SCREEN_PROPERTIES)
+            labels = sorted({label for screen in screens for label in screen["filters"]})
+            if screens:
+                properties["screen"] = dict(properties["screen"], enum=[screen["screen"] for screen in screens] + ["none"])
+                if labels:
+                    properties["filters"] = dict(properties["filters"], items={"type": "string", "enum": labels})
+                schema = dict(schema, properties=properties)
+            else:
+                properties.pop("screen")
+                properties.pop("filters", None)
+                schema = dict(schema, properties=properties)
+            tool = dict(tool, inputSchema=schema)
+        chosen.append(tool)
+    return chosen
+
+
+def apply_screen(env, arguments):
+    """``arguments`` of the search or report tool with their screen and filters made its model and Odoo's own
+    conditions (navigation.screen_search), and the AI's own conditions checked (check_values) and added."""
+    screen, filters = arguments.pop("screen", None), arguments.pop("filters", None) or []
+    if arguments.get("model") in env and not (screen and screen != "none"):
+        check_values(env[arguments["model"]], clean_domain(arguments.get("domain") or []))
+    if screen and screen != "none":
+        extra = clean_domain(arguments.get("domain") or [])
+        arguments["model"], arguments["domain"] = screen_search(env, screen, filters)
+        if isinstance(extra, list):
+            check_values(env[arguments["model"]], extra)
+            arguments["domain"] += extra
+    return arguments
+
+
+def check_values(model, domain):
+    """Refuses a condition on a value that does not exist, which would quietly find nothing: a status not among
+    its field's values, or a linked record's name ("Stage" = "Lost") that no record the user may read has. The AI is
+    told so and picks a real value or Odoo's own filter. Only the user's own rights are used, so nothing hidden from
+    them is revealed, and a selection's values are not business data."""
+    for term in domain if isinstance(domain, list) else []:
+        if not (isinstance(term, (list, tuple)) and len(term) == 3 and isinstance(term[0], str) and term[1] in ("=", "in")):
+            continue
+        path, values = term[0].split("."), term[2] if isinstance(term[2], list) else [term[2]]
+        field = model._fields.get(path[0])
+        values = [value for value in values if isinstance(value, str) and value != CURRENT_USER]
+        if field is None or not values:
+            continue
+        if len(path) == 1 and field.type == "selection":
+            options = dict(field._description_selection(model.env))
+            wrong = [value for value in values if value not in options]
+            if wrong:
+                raise ValidationError(_("%(field)s has no value %(wrong)s. Its values: %(values)s.") % {
+                    "field": term[0], "wrong": ", ".join(wrong),
+                    "values": ", ".join("%s (%s)" % item for item in options.items())})
+        elif field.type == "many2one" and path[1:] in ([], ["name"], ["display_name"]):
+            linked = model.env[field.comodel_name]
+            with contextlib.suppress(AccessError):  # a kind of record the user cannot read is left to the tool
+                wrong = [value for value in values if not linked.search_count([("display_name", "=ilike", value)], limit=1)]
+                if wrong:
+                    raise ValidationError(_("No %(kind)s named %(wrong)s is available to you. Use a real name, or "
+                                            "the screen's filter when one means what is asked.") % {
+                                                "kind": linked._description, "wrong": ", ".join(wrong)})
+
+
+def with_archived(model, domain):
+    """``domain``, also over archived records when it finds none but archived ones match, as Odoo archives lost
+    opportunities and retired products: the basis then names Active as both."""
+    if "active" not in model._fields or not isinstance(domain, list) or any(
+            isinstance(term, (list, tuple)) and term and str(term[0]).split(".")[0] == "active" for term in domain):
+        return domain
+    with contextlib.suppress(ValueError, UserError):  # a domain Odoo refuses is left for it to report
+        if not model.search_count(domain, limit=1) and model.with_context(active_test=False).search_count(domain, limit=1):
+            return domain + [["active", "in", [True, False]]]
+    return domain
+
+
 def available_tools(env):
     app_tool = _TOOL["odoo_app_structure"]
     tools = [_TOOL["odoo_instance_info"], {
@@ -250,10 +331,7 @@ def execute_chart(env, arguments):
         if key in {"model", "group_by", "interval", "measures", "domain", "chart_type", "limit", "title", "smallest",
                    "screen", "filters"}
     }}
-    if arguments.get("screen"):
-        extra = clean_domain(arguments["domain"])
-        arguments["model"], arguments["domain"] = screen_search(env, arguments["screen"], arguments.get("filters") or [])
-        arguments["domain"] += extra if isinstance(extra, list) else []
+    arguments = apply_screen(env, arguments)
     name, group, interval = arguments.get("model"), arguments.get("group_by"), arguments["interval"]
     measures, domain = arguments["measures"], clean_domain(arguments["domain"])
     chart, title, limit = arguments.get("chart_type"), arguments.get("title"), arguments.get("limit")
@@ -278,7 +356,7 @@ def execute_chart(env, arguments):
     # "count", a numeric field (summed) or "field:avg" as Odoo aggregates them, computed as Odoo's reports do.
     model, named = on_report(env[name], clean_field_names(env[name], {"domain": domain, "groupby": [group], "aggregates": [
         "__count" if measure == "count" else measure if ":" in measure else f"{measure}:sum" for measure in measures]}))
-    name, domain, group, specs = model._name, named["domain"], named["groupby"][0], named["aggregates"]
+    name, domain, group, specs = model._name, with_archived(model, named["domain"]), named["groupby"][0], named["aggregates"]
     definitions = model.fields_get(attributes=["string", "type", "groupable", "aggregator"])
 
     def groupable(field):

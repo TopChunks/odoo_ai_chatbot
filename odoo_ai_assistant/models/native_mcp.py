@@ -37,10 +37,10 @@ else:
     )
 
 from .tools import (
-    SCREEN_PROPERTIES, based_on, cell_value, clean_domain, clean_field_names, clean_order, data_access_menus,
-    report_filters,
+    SCREEN_PROPERTIES, apply_screen, based_on, cell_value, clean_domain, clean_field_names, clean_order,
+    data_access_menus, report_filters, with_archived,
 )
-from .navigation import button_label, eval_view_expression, screen_search, visible_for
+from .navigation import button_label, eval_view_expression, visible_for
 from .providers import _vocabulary_pattern
 from .limits import (
     CREDENTIAL_FIELD, CURRENT_USER, MAX_ATTACHMENT_TEXT_CHARS, MAX_FIELD_SUGGESTIONS, MAX_AUDIT_TOOL_NAME_CHARS, MAX_IMAGE_CHARS, MAX_LINE_FIELD_EXAMPLES,
@@ -1267,13 +1267,8 @@ class NativeToolRequest(models.Model):
                     and isinstance(item["name"], str) for item in value
                 ):
                     arguments[key] = [item["name"] for item in value]
-        if tool == "mcp_search_records" and {"screen", "filters"} & set(arguments):
-            # A screen and its filters become its model and Odoo's own conditions; the AI's own conditions are added.
-            screen, filters = arguments.pop("screen", None), arguments.pop("filters", None) or []
-            if screen:
-                extra = clean_domain(arguments.get("domain") or [])
-                arguments["model"], arguments["domain"] = screen_search(conversation.env, screen, filters)
-                arguments["domain"] += extra if isinstance(extra, list) else []
+        if tool == "mcp_search_records":
+            arguments = apply_screen(conversation.env, arguments)
         bridge = conversation.env["odoo.ai.assistant.native.mcp"]
         plan = arguments
         arguments, dependencies = bridge._resolve_plan(tool, plan)
@@ -1287,7 +1282,8 @@ class NativeToolRequest(models.Model):
         if isinstance(arguments.get("model"), str) and arguments["model"] in conversation.env:
             arguments = clean_field_names(conversation.env[arguments["model"]], arguments)
             if tool == "mcp_search_records":
-                arguments["domain"] = report_filters(conversation.env[arguments["model"]], arguments.get("domain") or [])
+                model = conversation.env[arguments["model"]]
+                arguments["domain"] = with_archived(model, report_filters(model, arguments.get("domain") or []))
         if isinstance(arguments.get("fields"), list) and "*" in arguments["fields"]:
             del arguments["fields"]
         entry = bridge._entry(tool, arguments)

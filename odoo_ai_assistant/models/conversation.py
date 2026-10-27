@@ -21,7 +21,7 @@ from .formatting import format_reply
 from . import chart_export
 from .configuration import _SETTINGS_FIELDS
 from .tools import (
-    CHART_TOOL, available_tools, chart_models, execute_chart, execute_tool, parse_tool_arguments, requested_chart_tool,
+    CHART_TOOL, available_tools, chart_models, screen_choices, execute_chart, execute_tool, parse_tool_arguments, requested_chart_tool,
 )
 from .limits import (
     CHANGE_OPERATIONS, CONVERSATION_LOCK_NAMESPACE, CONVERSATION_PREVIEW_CHARS, CREDENTIAL_FIELD, FILE_THUMBNAIL_SIDE,
@@ -34,8 +34,7 @@ from .limits import (
 from .navigation import (
     accessible_apps, accessible_menu_names, app_screens, app_structure, apps_named_in, apps_using_models,
     buttons_named_in, current_screen, menus_named_in, screen_context, screen_details, screen_details_for_ai,
-    screens_named_in,
-    unknown_model_names,
+    screens_named_in, uninstalled_named_in, unknown_model_names,
 )
 from .native_mcp import (
     _IMAGE_TYPES, _UPLOAD_REFERENCE, MAX_UPLOAD_BYTES, NATIVE_TOOL_PREFIX, PRESS_TOOL, DirectReply,
@@ -620,6 +619,12 @@ class AIConversation(models.Model):
             return
         action_request, chart_request = intent in CHANGE_OPERATIONS, intent == "CHART"
         help_request = intent == "HELP"
+        missing = config.local_tools and not help_request and uninstalled_named_in(self.env, self._latest_question())
+        if missing:
+            self._store_answer(_("%s is not installed or turned on in this Odoo, so there are no such records. An "
+                                 "administrator can turn it on in the app's settings or install it from Apps.")
+                               % missing, execution_steps=steps)
+            return
         # Made-up values were asked for: new records may then carry names the user never wrote (see _prepare_request).
         self = self.with_context(odoo_ai_sample_data=intent == "GENERATE")
         change_tools = []
@@ -632,6 +637,8 @@ class AIConversation(models.Model):
         client = config._client("reply", self._model(config))
         # Reads are offered no data-changing tools, so their rules are left out of the instructions.
         context_options = dict(self._reply_context(config, data=not help_request), change_request=action_request)
+        # The screens offered become the only screen choices of the search and report tools.
+        tools = screen_choices(tools, (context_options.get("screen_context") or {}).get("screens") or [])
         selected_view = requested_chart_tool(tools) if chart_request else None
         reply_tools = [selected_view] if selected_view else tools
         try:
@@ -645,6 +652,12 @@ class AIConversation(models.Model):
             # The model ignored the chart instruction; let it choose freely among all tools once.
             reply_tools = tools
             text, calls = client.reply(self._model(config).identifier, history, tools, **context_options)
+        if not calls and reply_tools and not help_request:
+            # Data was asked but no tool called: the text may describe records never read, so ask once more.
+            latest = history[-1]
+            text, calls = client.reply(self._model(config).identifier, history[:-1] + [dict(latest, content=latest[
+                "content"] + "\n\n[Odoo note: you answered without reading Odoo. If the answer needs this database's "
+                             "records, call a tool now; otherwise give the same answer.]")], reply_tools, **context_options)
         try:
             title = self._topic_title(config)
         except UserError:

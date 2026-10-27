@@ -162,6 +162,23 @@ def screens_named_in(env, text, models):
     return [{"screen": path, "filters": filters} for _rank, path, filters in named[:MAX_SCREEN_MATCHES]]
 
 
+def uninstalled_named_in(env, text):
+    """The name of a feature or app that ``text`` names but this Odoo has not installed (Purchase Agreements): the
+    labels of the settings that install a module, and app names of two words or more, so the AI is never asked
+    for records that cannot exist. None when none is named."""
+    settings = env["res.config.settings"].sudo().fields_get(attributes=["string"])
+    names = {name[len("module_"):]: field["string"] for name, field in settings.items() if name.startswith("module_")}
+    modules = env["ir.module.module"].sudo().search(["&", ("state", "!=", "installed"),
+                                                     "|", ("name", "in", list(names)), ("application", "=", True)])
+    words = _words(text)
+    for module in modules:
+        label = names.get(module.name) or module.shortdesc or ""
+        pattern = len(_words(label)) >= 2 and _words(label) <= words and _vocabulary_pattern([label])
+        if pattern and pattern.search(text):
+            return label
+    return None
+
+
 def screen_search(env, screen, filters=()):
     """(model, domain) of the screen ``screen`` (its menu path) as Odoo's own screen searches: its action's model and
     conditions, and its filters named in ``filters`` as the search bar applies them (one group's filters either, the
