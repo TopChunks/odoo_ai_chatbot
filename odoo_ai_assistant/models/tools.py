@@ -17,7 +17,7 @@ from .limits import (
     CLOSE_FIELD_NAME, CREDENTIAL_FIELD, CURRENT_USER, MAX_CHART_TITLE_CHARS, MAX_FIELD_SUGGESTIONS, MAX_REPORT_MEASURES, MAX_TIED_NAMES,
     is_restricted_model,
 )
-from .navigation import accessible_apps, app_structure, screen_details
+from .navigation import accessible_apps, app_structure, screen_details, screen_search
 from .providers import CHART_TOOL
 
 TOOLS = [
@@ -87,6 +87,15 @@ def requested_chart_tool(tools):
     return next((tool for tool in tools if tool.get("name") == CHART_TOOL), None)
 
 
+# A screen and its filters, as Odoo's own screens search (navigation.screen_search), for the search and report tools.
+SCREEN_PROPERTIES = {
+    "screen": {"type": "string", "description": "A screen from screens (its full menu path): search as that Odoo "
+                                                "screen does, its model and own conditions included"},
+    "filters": {"type": "array", "items": {"type": "string"},
+                "description": "Names of that screen's filters to apply, as screens lists them"},
+}
+
+
 def available_tools(env):
     app_tool = _TOOL["odoo_app_structure"]
     tools = [_TOOL["odoo_instance_info"], {
@@ -125,6 +134,7 @@ def available_tools(env):
                           "description": "Only the N largest groups (top N); the rest add up as Others"},
                 "smallest": {"type": "boolean", "description": "Smallest groups first (bottom N, least)"},
                 "title": {"type": "string", "description": "Short title without record values"},
+                **SCREEN_PROPERTIES,
             }, "required": ["model", "group_by", "measures", "chart_type", "title"], "additionalProperties": False},
         })
     tools.extend(env["odoo.ai.assistant.native.mcp"]._provider_tools())
@@ -237,8 +247,13 @@ def execute_chart(env, arguments):
     # Only the documented arguments are used; omitted optional ones take their documented defaults.
     arguments = {"interval": "month", "domain": [], "measures": ["count"], **{
         key: value for key, value in arguments.items()
-        if key in {"model", "group_by", "interval", "measures", "domain", "chart_type", "limit", "title", "smallest"}
+        if key in {"model", "group_by", "interval", "measures", "domain", "chart_type", "limit", "title", "smallest",
+                   "screen", "filters"}
     }}
+    if arguments.get("screen"):
+        extra = clean_domain(arguments["domain"])
+        arguments["model"], arguments["domain"] = screen_search(env, arguments["screen"], arguments.get("filters") or [])
+        arguments["domain"] += extra if isinstance(extra, list) else []
     name, group, interval = arguments.get("model"), arguments.get("group_by"), arguments["interval"]
     measures, domain = arguments["measures"], clean_domain(arguments["domain"])
     chart, title, limit = arguments.get("chart_type"), arguments.get("title"), arguments.get("limit")
@@ -392,7 +407,7 @@ def on_report(model, arguments):
         return model, dict(arguments, domain=report_filters(model, arguments["domain"], arguments["groupby"]),
                            aggregates=[f"{link}:count_distinct" if link and spec == "__count" else spec
                                        for spec in arguments["aggregates"]])
-    if "state" not in model._fields:
+    if "state" not in model._fields or not model._fields["state"].store:  # a computed status (users) is no document
         return model, arguments
     used = {spec.split(":")[0] for spec in arguments["groupby"] + arguments["aggregates"] if spec != "__count"} | {
         str(term[0]).split(".")[0] for term in arguments["domain"] if isinstance(term, (list, tuple)) and term}
@@ -556,8 +571,8 @@ def cell_value(model, name, value, row=None):
     env = model.env
     if field and field.type in ("one2many", "many2many") and isinstance(value, list):
         # Linked records by name, as far as the user may read them: their IDs mean nothing to a reader.
-        value = ", ".join(env[field.comodel_name].browse(value).exists()._filtered_access("read").mapped(
-            "display_name")) or None
+        value = ", ".join(filter(None, env[field.comodel_name].browse(value).exists()._filtered_access("read").mapped(
+            "display_name"))) or None  # a linked record without a name has none (False)
     elif field and field.type == "selection" and isinstance(value, str):
         value = dict(field._description_selection(env)).get(value, value)
     elif field and field.type in ("date", "datetime") and isinstance(value, str):

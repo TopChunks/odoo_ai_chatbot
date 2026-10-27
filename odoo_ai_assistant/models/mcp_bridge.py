@@ -78,6 +78,8 @@ class AILocalMCP(models.AbstractModel):
         for label, *values in grouped:
             if label in options:
                 label = options[label]
+            elif field.type == "boolean":
+                label = _("Yes") if label else _("No")
             elif isinstance(label, models.BaseModel):
                 label = label.display_name if label else _("Unassigned")
             elif isinstance(label, date) and ":" in group:

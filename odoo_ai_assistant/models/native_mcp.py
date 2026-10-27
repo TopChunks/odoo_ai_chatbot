@@ -37,9 +37,10 @@ else:
     )
 
 from .tools import (
-    based_on, cell_value, clean_domain, clean_field_names, clean_order, data_access_menus, report_filters,
+    SCREEN_PROPERTIES, based_on, cell_value, clean_domain, clean_field_names, clean_order, data_access_menus,
+    report_filters,
 )
-from .navigation import button_label, eval_view_expression, visible_for
+from .navigation import button_label, eval_view_expression, screen_search, visible_for
 from .providers import _vocabulary_pattern
 from .limits import (
     CREDENTIAL_FIELD, CURRENT_USER, MAX_ATTACHMENT_TEXT_CHARS, MAX_FIELD_SUGGESTIONS, MAX_AUDIT_TOOL_NAME_CHARS, MAX_IMAGE_CHARS, MAX_LINE_FIELD_EXAMPLES,
@@ -711,7 +712,8 @@ class NativeMCP(models.AbstractModel):
             # Sharing, confirmation, argument format, record names and upload references are explained once
             # in the system instructions, which are always sent with these tools.
             "description": entry["description"],
-            "inputSchema": entry["schema"], "strict": False,
+            "inputSchema": dict(entry["schema"], properties={**entry["schema"].get("properties", {}), **SCREEN_PROPERTIES})
+            if name == "mcp_search_records" else entry["schema"], "strict": False,
         } for name, entry in self._catalogue().items()]
 
     def _planning_context(self, request=None, all_fields=False):
@@ -1265,6 +1267,13 @@ class NativeToolRequest(models.Model):
                     and isinstance(item["name"], str) for item in value
                 ):
                     arguments[key] = [item["name"] for item in value]
+        if tool == "mcp_search_records" and {"screen", "filters"} & set(arguments):
+            # A screen and its filters become its model and Odoo's own conditions; the AI's own conditions are added.
+            screen, filters = arguments.pop("screen", None), arguments.pop("filters", None) or []
+            if screen:
+                extra = clean_domain(arguments.get("domain") or [])
+                arguments["model"], arguments["domain"] = screen_search(conversation.env, screen, filters)
+                arguments["domain"] += extra if isinstance(extra, list) else []
         bridge = conversation.env["odoo.ai.assistant.native.mcp"]
         plan = arguments
         arguments, dependencies = bridge._resolve_plan(tool, plan)

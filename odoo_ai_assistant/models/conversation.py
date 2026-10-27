@@ -32,8 +32,9 @@ from .limits import (
     WELCOME_SUGGESTIONS, is_restricted_model,
 )
 from .navigation import (
-    accessible_apps, accessible_menu_names, app_screens, app_structure, apps_named_in, apps_using_models, filters_named_in,
+    accessible_apps, accessible_menu_names, app_screens, app_structure, apps_named_in, apps_using_models,
     buttons_named_in, current_screen, menus_named_in, screen_context, screen_details, screen_details_for_ai,
+    screens_named_in,
     unknown_model_names,
 )
 from .native_mcp import (
@@ -688,9 +689,9 @@ class AIConversation(models.Model):
                 request, all_fields=action_schema)
             if metadata:
                 context["native_schema"] = metadata
-            named = data and filters_named_in(self.env, self._latest_question(), chart_models(self.env))
-            if named:
-                context["named_filters"] = named
+            screens = data and screens_named_in(self.env, self._latest_question(), chart_models(self.env))
+            if screens:
+                context["screens"] = screens
             # The AI Settings' own labels, so the AI knows these are settings an administrator changes, not records.
             context["ai_settings"] = [field["string"] for field in config.fields_get(_SETTINGS_FIELDS, ["string"]).values()]
         options = {"screen_context": context} if context else {}

@@ -1009,9 +1009,13 @@ class ProviderClient:
                 system += ("The AI Settings named in ai_settings are not records: "
                            "they apply to everyone and only administrators change them on the Settings page, never "
                            "through the chat, so for them do not suggest enabling AI changes or MCP Server. ")
-            if "named_filters" in screen_context:
-                system += ("named_filters are Odoo's own search filters whose names the request uses; when one means what "
-                           "the request asks, search with that domain as written. ")
+            if "screens" in screen_context:
+                system += ("screens are Odoo screens the request may mean, each with its own filters. When one fits, "
+                           "search or report with its screen and filters as listed instead of writing those "
+                           "conditions: Odoo applies them as its screen does (archived and lost records, statuses, "
+                           "document types); add in domain only what no filter covers, such as dates or names. If no "
+                           "screen or model holds the kind of record asked, say this Odoo has none; never show "
+                           "another kind instead. ")
             if "named_menus" in screen_context:
                 system += ("named_menus lists each screen the request names: its full path (App / Menu / ...), the "
                            "model of its records and whether you may read them (ai_can_read). Use it to say where the "

@@ -2,14 +2,16 @@ import ast
 import importlib.util
 import re
 
+from dateutil.relativedelta import relativedelta
 from lxml import etree
 
-from odoo import _, release
+from odoo import _, fields, release
+from odoo.fields import Domain
 from odoo.exceptions import AccessError, ValidationError
 from odoo.tools.safe_eval import safe_eval
 
 from .limits import (
-    CREDENTIAL_FIELD, CURRENT_USER, MAX_CONTEXT_SCREENS, MAX_FIELD_SUGGESTIONS, MAX_LOOKUP_NAME_CHARS, MAX_SCREEN_BUTTONS,
+    CREDENTIAL_FIELD, MAX_CONTEXT_SCREENS, MAX_FIELD_SUGGESTIONS, MAX_LOOKUP_NAME_CHARS, MAX_SCREEN_BUTTONS,
     MAX_SCREEN_FIELDS, MAX_SCREEN_MATCHES, is_restricted_model,
 )
 from .providers import _vocabulary_pattern
@@ -104,19 +106,84 @@ def menus_named_in(env, text):
             for row in named[:MAX_SCREEN_MATCHES]]
 
 
-def filters_named_in(env, text, models):
-    """Odoo's own search filters of ``models`` (label, model and search) whose label starts with a word ``text``
-    uses ("overdue" names Overdue Opportunities, not every Opportunities filter), so the AI searches the way Odoo's
-    screens do instead of guessing a meaning. uid becomes the AI's placeholder for the signed-in user."""
+def _words(text):
+    """The words of ``text`` of four letters or more, singular as a menu names them (opportunities: opportunity)."""
+    return {word[:-3] + "y" if word.endswith("ies") else word[:-1] if word.endswith("s") and not word.endswith("ss")
+            else word for word in re.findall(r"[^\W\d_]{4,}", (text or "").casefold())}
+
+
+def _window_screens(env):
+    """Every screen the user can open from Odoo's menus: its full path and window action, in menu order."""
+    menus = env["ir.ui.menu"].load_menus(False)
     found = []
-    for model in models:
-        for node in etree.fromstring(env[model].get_view(view_type="search")["arch"]).iter("filter"):
-            label, domain = node.get("string") or "", node.get("domain") or ""
-            first = next((word for word in label.split() if len(word) >= 3), "")
-            if domain.strip() not in {"", "[]"} and (pattern := _vocabulary_pattern([first])) and pattern.search(text):
-                found.append({"model": model, "filter": label,
-                              "domain": re.sub(r"\buid\b", repr(CURRENT_USER), " ".join(domain.split()))})
-    return found[:MAX_SCREEN_MATCHES]
+
+    def visit(menu_id, path):
+        menu = menus[menu_id]
+        path = path + [menu["name"]]
+        if menu.get("action_model") == "ir.actions.act_window" and menu.get("action_id"):
+            found.append((" / ".join(path), env["ir.actions.act_window"].sudo().browse(menu["action_id"])))
+        for child in menu["children"]:
+            visit(child, path)
+
+    for app in menus["root"]["children"]:
+        visit(app, [])
+    return found
+
+
+def _screen_filters(env, action):
+    """Odoo's own filters of ``action``'s search bar: (label, group, domain), groups split by separators as the
+    search bar combines them; date periods, groupings and hidden filters are left out."""
+    arch = etree.fromstring(env[action.res_model].get_view(action.search_view_id.id or None, "search")["arch"])
+    found, group = [], 0
+    for node in arch:
+        if node.tag == "separator":
+            group += 1
+        elif (node.tag == "filter" and node.get("string") and node.get("domain") and not node.get("date")
+              and node.get("invisible") not in _TRUE and "group_by" not in (node.get("context") or "")):
+            found.append((node.get("string"), group, node.get("domain")))
+    return found
+
+
+def screens_named_in(env, text, models):
+    """The screens the user can open, among ``models``, that ``text`` names by their menu, their filters or their kind
+    of record, with their filter names: the AI searches by picking a screen and its filters as a user does, and Odoo
+    applies them as its screen does (archived and lost records, statuses, document types), so no model needs to know
+    how. Screens named by their menu ("Bills") come first, then by a filter ("Open Opportunities"), then by kind."""
+    words, named = _words(text), []
+    for path, action in _window_screens(env):
+        if action.res_model in models:
+            filters = [label for label, _group, _domain in _screen_filters(env, action)]
+            rank = next((rank for rank, names in enumerate((path.rsplit(" / ", 1)[-1], " ".join(filters),
+                                                            env[action.res_model]._description))
+                         if words & _words(names)), None)
+            if rank is not None:
+                named.append((rank, path, filters))
+    named.sort(key=lambda item: item[0])
+    return [{"screen": path, "filters": filters} for _rank, path, filters in named[:MAX_SCREEN_MATCHES]]
+
+
+def screen_search(env, screen, filters=()):
+    """(model, domain) of the screen ``screen`` (its menu path) as Odoo's own screen searches: its action's model and
+    conditions, and its filters named in ``filters`` as the search bar applies them (one group's filters either, the
+    groups all). Only screens the user can open from their menus."""
+    wanted = " / ".join(part.strip() for part in str(screen).replace(">", "/").split("/")).casefold()
+    action = next((action for path, action in _window_screens(env) if path.casefold() == wanted), None)
+    if action is None:
+        raise ValidationError(_("No screen you can open is called '%s'. Use a screen listed in screens.") % screen)
+    context = dict(env["ir.actions.actions"]._get_eval_context(), relativedelta=relativedelta,
+                   context_today=lambda: fields.Date.context_today(env.user), allowed_company_ids=env.companies.ids)
+    known = {label.casefold(): (group, text) for label, group, text in _screen_filters(env, action)}
+    unknown = [name for name in filters if str(name).casefold() not in known]
+    if unknown:
+        raise ValidationError(_("%(screen)s has no filter %(names)s. Its filters: %(filters)s.") % {
+            "screen": screen, "names": ", ".join(map(str, unknown)),
+            "filters": ", ".join(label for label, _group, _domain in _screen_filters(env, action))})
+    groups = {}
+    for name in filters:
+        group, text = known[str(name).casefold()]
+        groups.setdefault(group, []).append(Domain(safe_eval(text, context)))
+    domain = Domain.AND([Domain(safe_eval(action.domain or "[]", context)), *map(Domain.OR, groups.values())])
+    return action.res_model, [list(term) if isinstance(term, tuple) else term for term in domain]
 
 
 def unknown_model_names(env, text):
