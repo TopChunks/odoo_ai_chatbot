@@ -1,4 +1,5 @@
 import ast
+import difflib
 import importlib.util
 import re
 
@@ -11,7 +12,7 @@ from odoo.exceptions import AccessError, ValidationError
 from odoo.tools.safe_eval import safe_eval
 
 from .limits import (
-    CREDENTIAL_FIELD, MAX_CONTEXT_SCREENS, MAX_FIELD_SUGGESTIONS, MAX_LOOKUP_NAME_CHARS, MAX_SCREEN_BUTTONS,
+    CLOSE_FIELD_NAME, CREDENTIAL_FIELD, MAX_CONTEXT_SCREENS, MAX_FIELD_SUGGESTIONS, MAX_LOOKUP_NAME_CHARS, MAX_SCREEN_BUTTONS,
     MAX_SCREEN_DETAILS, MAX_SCREEN_FIELDS, MAX_SCREEN_MATCHES, is_restricted_model,
 )
 from .providers import _vocabulary_pattern
@@ -112,6 +113,12 @@ def _words(text):
             else word for word in re.findall(r"[^\W\d_]{4,}", (text or "").casefold())}
 
 
+def _shares_word(words, others):
+    """Whether ``words`` and ``others`` share a word, a misspelt one too ("oppurtunities": opportunity)."""
+    return bool(words & others) or any(difflib.get_close_matches(word, others, n=1, cutoff=CLOSE_FIELD_NAME)
+                                       for word in words)
+
+
 def _window_screens(env):
     """Every screen the user can open from Odoo's menus: its full path and window action, in menu order."""
     menus = env["ir.ui.menu"].load_menus(False)
@@ -155,7 +162,7 @@ def screens_named_in(env, text, models):
             filters = [label for label, _group, _domain in _screen_filters(env, action)]
             rank = next((rank for rank, names in enumerate((path.rsplit(" / ", 1)[-1], " ".join(filters),
                                                             env[action.res_model]._description))
-                         if words & _words(names)), None)
+                         if _shares_word(words, _words(names))), None)
             if rank is not None:
                 named.append((rank, path, filters))
     named.sort(key=lambda item: item[0])
