@@ -190,6 +190,12 @@
 
     .o_ai_message_content {
         min-width: 0;
+
+        // An earlier try of an answer the AI went on from: only its "Earlier step" line until unfolded.
+        &.o_ai_folded > .o_ai_visualization,
+        &.o_ai_folded > .o_ai_bubble {
+            display: none;
+        }
     }
 
     .o_ai_user_avatar {

@@ -119,7 +119,7 @@
                             <div class="o_ai_message d-flex gap-2" t-att-class="{'o_ai_user': message.role === 'user', 'mb-1': continuesAnswer(message_index + 1), 'mb-3': !continuesAnswer(message_index + 1)}">
                                 <img t-if="message.role === 'assistant'" src="/odoo_ai_assistant/static/description/icon.svg" class="o_ai_message_avatar" t-att-class="{'invisible': continuesAnswer(message_index)}" alt="" width="32" height="32"/>
                                 <span t-else="" class="o_ai_message_avatar o_ai_user_avatar" t-att-title="userName" aria-hidden="true" t-esc="userInitial"/>
-                                <div class="o_ai_message_content flex-grow-1">
+                                <div class="o_ai_message_content flex-grow-1" t-att-class="{'o_ai_folded': earlierStep(message_index) and !openSteps[message.id]}">
                                     <t t-set="payload" t-value="messagePayload(message)"/>
                                     <t t-set="content" t-value="messageContent(message)"/>
                                     <t t-set="formatted" t-value="messageHTML(message)"/>
@@ -137,6 +137,10 @@
                                         <summary>Steps taken</summary>
                                         <ol class="mt-1 mb-0"><li t-foreach="message.execution_steps" t-as="step" t-key="step_index" t-esc="step"/></ol>
                                     </details>
+                                    <button t-if="earlierStep(message_index)" type="button" class="btn btn-link btn-sm p-0 mb-1 text-muted text-start"
+                                            t-on-click="() => this.toggleStep(message.id)">
+                                        <i class="fa me-1" t-att-class="openSteps[message.id] ? 'fa-caret-down' : 'fa-caret-right'" aria-hidden="true"/>Earlier step: <t t-esc="payload.basis or payload.title"/>
+                                    </button>
                                     <LocalVisualization t-if="payload" payload="payload" busy="busy"
                                         onConfirm="(id) => ai.toolAction('confirm_tool', id)"
                                         onCancel="(id) => ai.toolAction('cancel_tool', id)"

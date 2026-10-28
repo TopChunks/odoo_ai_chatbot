@@ -1005,7 +1005,8 @@ class ProviderClient:
                        "approved for this provider request. "
                        "Use it to answer the latest question or select the next necessary native tool. "
                        "Do not repeat the completed action. Further data-changing tools still require confirmation. "
-                       "Report errors, partial results and truncation faithfully. ")
+                       "Report errors, partial results and truncation faithfully. Odoo shows the tables and charts "
+                       "itself: never draw one in text; give the key figures in sentences. ")
         if screen_context is not None:
             system += (
                 "\nACCESSIBLE_SCREEN_METADATA (at the end of these instructions) and REQUEST_CONTEXT (in the "

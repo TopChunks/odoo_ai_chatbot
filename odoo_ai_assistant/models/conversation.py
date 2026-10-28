@@ -870,13 +870,21 @@ class AIConversation(models.Model):
         read, and goes on as an agent does: more searches (won, then lost) for up to MAX_AGENT_STEPS rounds, then its
         answer in words with the real figures (a win rate, a reason, a comparison). Without a final text, the
         results shown stand as the answer."""
-        found = []
+        found, start, checked = [], since, False
         for _round in range(MAX_AGENT_STEPS):
             found += self._read_results(since)
             since = self._last_message_id()
             self._add_step(steps, _("Reading the results"))
             text, calls = client.reply(self._model(config).identifier, history, tools, **dict(options, tool_context=found))
             if not calls:
+                # Its answer is checked once against what was searched: a similar but other kind of data (stock
+                # moves for on-hand stock) is redone or said plainly, never presented as the answer.
+                mismatch = not checked and text.strip() and self._result_mismatch(client, config, history, start)
+                if mismatch:
+                    checked = True
+                    found.append({"answer_check": mismatch + ". Search again for what was asked, or say plainly "
+                                  "which data Odoo does not have or does not let you read."})
+                    continue
                 if text.strip():
                     self._store_answer(text, execution_steps=steps, provider_sensitive=True)
                 return

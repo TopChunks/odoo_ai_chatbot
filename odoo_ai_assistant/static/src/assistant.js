@@ -328,6 +328,7 @@ export class AssistantPanel extends Component {
         this.composerRef = useRef("composer");
         useAutoresize(this.composerRef);  // the message box grows with its text, as Discuss's composer
         this.renaming = useState({ id: null, name: "" });
+        this.openSteps = useState({});  // earlier tries of an answer the user unfolded, by message id
         useAutofocus({ refName: "renameInput" });
         this.fileInputRef = useRef("fileInput");
         this.lastMessage = null;
@@ -455,6 +456,25 @@ export class AssistantPanel extends Component {
         const messages = this.state.messages;
         return index > 0 && index < messages.length && messages[index].role === "assistant" &&
             messages[index - 1].role === "assistant" && !this.startsNewDay(index);
+    }
+
+    /** Whether message ``index`` holds an earlier try of an answer the AI went on from and then explained (sharing
+     *  on): it folds away, as the last table or chart and the AI's words answer the question. */
+    earlierStep(index) {
+        const messages = this.state.messages;
+        if (!this.messagePayload(messages[index])) {
+            return false;
+        }
+        let last = index;
+        while (this.continuesAnswer(last + 1)) {
+            last++;
+        }
+        return Boolean(messages[last].provider_sensitive) && !this.messagePayload(messages[last]) &&
+            messages.slice(index + 1, last).some((message) => this.messagePayload(message));
+    }
+
+    toggleStep(messageId) {
+        this.openSteps[messageId] = !this.openSteps[messageId];
     }
 
     startsNewDay(index) {
