@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-name="odoo_ai_agent.RenameInput">
+        <input class="form-control form-control-sm" t-model="state.value" t-ref="autofocus"
+               t-on-keydown="onKeydown" t-on-blur="() => props.onDone(state.value)" t-on-click.stop=""/>
+    </t>
+
+    <t t-name="odoo_ai_agent.ConversationList">
+        <div class="o-ai-agent-list d-flex flex-column h-100 flex-shrink-0 border-end border-secondary">
+            <div class="d-flex align-items-center gap-2 p-2">
+                <button class="btn btn-primary btn-sm text-nowrap" t-on-click="newChat"><i class="fa fa-plus me-1"/>Chat</button>
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-transparent"><i class="oi oi-search"/></span>
+                    <input class="form-control" placeholder="Search Conversation" t-model="state.search"/>
+                </div>
+            </div>
+            <div class="o-ai-agent-listTabs d-flex gap-3 px-3 border-bottom">
+                <button class="btn btn-link p-0 pb-1 text-reset" t-att-class="{ 'o-active fw-bold': state.tab === 'all' }" t-on-click="() => state.tab = 'all'">All</button>
+                <button class="btn btn-link p-0 pb-1 text-reset" t-att-class="{ 'o-active fw-bold': state.tab === 'unread' }" t-on-click="() => state.tab = 'unread'">Unread</button>
+            </div>
+            <div class="flex-grow-1 overflow-auto o-scrollbar-thin">
+                <div t-if="!threads.length" class="text-muted text-center p-4 small">
+                    <t t-if="state.search or state.tab === 'unread'">No conversation found.</t>
+                    <t t-else="">No conversation yet. Click <b>Chat</b> to start one.</t>
+                </div>
+                <div t-foreach="threads" t-as="thread" t-key="thread.localId"
+                     class="o-ai-agent-listItem d-flex gap-2 px-3 py-2 cursor-pointer border-bottom"
+                     t-att-class="{ 'o-active': thread.eq(store.discuss.thread), 'o-unread': isUnread(thread) }"
+                     t-on-click="() => this.open(thread)">
+                    <img t-att-src="iconUrl" class="o-ai-agent-listIcon rounded flex-shrink-0" alt=""/>
+                    <div class="flex-grow-1 o-min-width-0">
+                        <div class="d-flex align-items-baseline gap-2">
+                            <RenameInput t-if="state.renamingId === thread.id" value="thread.displayName" onDone="(value) => this.endRename(thread, value)"/>
+                            <span t-else="" class="text-truncate flex-grow-1" t-att-class="{ 'fw-bold': isUnread(thread), 'fw-semibold': !isUnread(thread) }" t-esc="thread.displayName"/>
+                            <span class="o-ai-agent-listTime small text-muted text-nowrap" t-esc="time(thread)"/>
+                            <span t-if="thread.needactionCounter" class="o-ai-agent-listBadge badge rounded-pill o-discuss-badge fw-bold" t-esc="thread.needactionCounter"/>
+                            <span class="o-ai-agent-listActions text-nowrap">
+                                <button class="btn btn-link btn-sm p-0 text-muted" title="Rename" t-on-click.stop="() => this.startRename(thread)"><i class="fa fa-pencil"/></button>
+                                <button class="btn btn-link btn-sm p-0 ms-2 text-muted" title="Delete" t-on-click.stop="() => this.delete(thread)"><i class="fa fa-trash"/></button>
+                            </span>
+                        </div>
+                        <div class="small text-muted text-truncate o-ai-agent-listPreview">
+                            <t t-if="lastMessage(thread)" t-out="lastMessage(thread).previewText"/>
+                            <t t-else="">New conversation</t>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </t>
+
+    <t t-name="odoo_ai_agent.SidebarEntry">
+        <DiscussSidebarCategory category="props.category"/>
+        <div t-if="props.category.open or isActive" class="o-mail-DiscussSidebarChannel-container d-flex flex-column mx-2 bg-inherit">
+            <button class="o-mail-DiscussSidebarChannel btn o-mail-DiscussSidebar-item d-flex align-items-center cursor-pointer o-py-0_5 mb-0 position-relative rounded-2 gap-1 border-0"
+                    t-att-class="{ 'o-active': isActive, 'bg-inherit': !isActive, 'o-unread': unreadCount, 'px-0': !store.discuss.isSidebarCompact, 'justify-content-center o-compact p-1': store.discuss.isSidebarCompact }"
+                    t-att-title="store.discuss.isSidebarCompact ? 'AI Agent' : undefined" t-on-click="open">
+                <div class="o-mail-DiscussSidebarChannel-itemMain border-0 text-reset d-flex align-items-center p-0 flex-grow-1 overflow-hidden">
+                    <div class="bg-inherit position-relative d-flex flex-shrink-0 o-my-0_5 rounded-2" style="width:26px;height:26px;" t-att-class="{ 'ms-2': !store.discuss.isSidebarCompact }">
+                        <img class="w-100 h-100 rounded-2 object-fit-cover" t-att-src="iconUrl" alt="AI Agent"/>
+                    </div>
+                    <span t-if="!store.discuss.isSidebarCompact" class="o-mail-DiscussSidebarChannel-itemName mx-2 text-truncate text-start lh-sm flex-grow-1" t-att-class="{ 'fw-bolder': unreadCount }">AI Agent</span>
+                </div>
+                <span t-if="unreadCount" class="o-mail-DiscussSidebar-badge badge rounded-pill o-discuss-badge fw-bold ms-1 me-2" t-esc="unreadCount"/>
+            </button>
+        </div>
+    </t>
+
+    <!-- "AI Conversations" shows one "AI Agent" entry instead of every conversation. -->
+    <t t-inherit="mail.DiscussSidebarCategories" t-inherit-mode="extension">
+        <xpath expr="//t[@t-call='mail.DiscussSidebarCategories.category']" position="attributes">
+            <attribute name="t-if">cat.isVisible and cat.id !== 'odoo_ai_agent.conversations'</attribute>
+        </xpath>
+        <xpath expr="//t[@t-call='mail.DiscussSidebarCategories.category']" position="after">
+            <AiAgentSidebarEntry t-if="cat.isVisible and cat.id === 'odoo_ai_agent.conversations'" category="cat"/>
+        </xpath>
+    </t>
+
+    <!-- The conversation list sits between the sidebar and the chat while an AI conversation is open. -->
+    <t t-inherit="mail.Discuss" t-inherit-mode="extension">
+        <xpath expr="//DiscussContent" position="before">
+            <AiAgentConversationList t-if="!ui.isSmall and store.discuss.thread?.isAiAgent"/>
+        </xpath>
+    </t>
+</templates>

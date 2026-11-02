@@ -1,0 +1,252 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-name="odoo_ai_agent.Blocks">
+        <div class="o-ai-agent-blocks d-flex flex-column gap-2 mt-1">
+            <t t-call="odoo_ai_agent.BlockList">
+                <t t-set="blockList" t-value="visibleBlocks"/>
+            </t>
+            <div t-if="dataUsed.length" class="o-ai-agent-dataUsed">
+                <button class="btn btn-link btn-sm p-0 text-muted text-decoration-none" t-on-click="() => state.showData = !state.showData">
+                    <i class="fa fa-fw" t-att-class="state.showData ? 'fa-caret-down' : 'fa-caret-right'"/>
+                    <i class="fa fa-database me-1"/>Data used (<t t-esc="dataUsed.length"/>)
+                </button>
+                <div t-if="state.showData" class="d-flex flex-column gap-2 mt-2 o-ai-agent-dataUsedList">
+                    <t t-call="odoo_ai_agent.BlockList">
+                        <t t-set="blockList" t-value="dataUsed"/>
+                    </t>
+                </div>
+            </div>
+            <div class="o-ai-agent-footer d-flex align-items-center flex-wrap gap-2 small text-muted">
+                <button t-if="steps.length" class="btn btn-link btn-sm p-0 text-muted text-decoration-none" t-on-click="() => state.showSteps = !state.showSteps">
+                    <i class="fa fa-fw" t-att-class="state.showSteps ? 'fa-caret-down' : 'fa-caret-right'"/>
+                    <t t-if="steps.length === 1">1 step taken</t>
+                    <t t-else=""><t t-esc="steps.length"/> steps taken</t>
+                    <span t-if="failedSteps" class="ms-1 text-warning">(<t t-esc="failedSteps"/> retried)</span>
+                </button>
+                <span t-if="payload.model" class="o-ai-agent-modelName"><i class="o-ai-agent-glyph me-1"/><t t-esc="payload.model"/></span>
+                <span class="ms-auto d-flex gap-1 o-ai-agent-feedback">
+                    <button class="btn btn-sm px-1 py-0" t-att-class="myReaction === '👍' ? 'btn-secondary' : 'btn-link text-muted'" title="Helpful" t-on-click="() => this.feedback('👍')">👍</button>
+                    <button class="btn btn-sm px-1 py-0" t-att-class="myReaction === '👎' ? 'btn-secondary' : 'btn-link text-muted'" title="Not helpful" t-on-click="() => this.feedback('👎')">👎</button>
+                </span>
+            </div>
+            <ol t-if="state.showSteps" class="o-ai-agent-steps small mb-0">
+                <li t-foreach="steps" t-as="step" t-key="step_index">
+                    <i t-if="step.status === 'ok'" class="fa fa-check text-success me-1"/>
+                    <i t-else="" class="fa fa-exclamation-triangle text-warning me-1"/>
+                    <t t-esc="step.label"/>
+                    <div t-if="step.detail" class="text-muted o-ai-agent-stepDetail" t-esc="step.detail"/>
+                </li>
+            </ol>
+        </div>
+    </t>
+
+    <t t-name="odoo_ai_agent.BlockList">
+            <t t-foreach="blockList" t-as="block" t-key="block.id">
+                <AiAgentTable t-if="block.type === 'table'" message="props.message" block="block"/>
+                <AiAgentRecord t-elif="block.type === 'record'" message="props.message" block="block"/>
+                <AiAgentChart t-elif="block.type === 'chart'" message="props.message" block="block"/>
+                <AiAgentAction t-elif="block.type === 'action'" message="props.message" block="block"/>
+                <AiAgentApps t-elif="block.type === 'app'" message="props.message" block="block"/>
+                <div t-elif="block.type === 'history'" class="o-ai-agent-card">
+                    <div class="o-ai-agent-cardHeader">
+                        <i class="fa fa-comments-o me-2 text-muted"/>
+                        <span class="fw-bold">Conversation history</span>
+                        <span class="text-muted ms-2 small" t-esc="block.model_label"/>
+                    </div>
+                    <div class="o-ai-agent-history">
+                        <div t-foreach="block.records" t-as="record" t-key="record.id" class="o-ai-agent-historyRecord">
+                            <div class="fw-semibold mb-1">
+                                <t t-esc="record.name"/>
+                                <span t-if="record.responsible" class="text-muted fw-normal small"> · <t t-esc="record.responsible"/></span>
+                                <span class="text-muted fw-normal small"> · <t t-esc="record.total"/> messages</span>
+                            </div>
+                            <div t-foreach="record.messages" t-as="msg" t-key="msg_index" class="o-ai-agent-historyItem">
+                                <div class="small"><b t-esc="msg.author"/> <span class="badge text-bg-light border ms-1" t-esc="msg.kind"/> <span class="text-muted ms-1" t-esc="msg.date"/></div>
+                                <div class="o-ai-agent-historyText" t-esc="msg.text"/>
+                            </div>
+                            <div t-if="!record.messages.length" class="text-muted small">No messages.</div>
+                        </div>
+                    </div>
+                </div>
+                <div t-elif="block.type === 'notice'" class="alert alert-warning d-flex gap-2 align-items-start mb-0 py-2" role="status">
+                    <i class="fa fa-lock mt-1"/><span t-esc="block.text"/>
+                </div>
+                <div t-elif="block.type === 'text'" class="o-ai-agent-card">
+                    <div class="o-ai-agent-cardBody"><pre class="mb-0 o-ai-agent-pre" t-esc="block.text"/></div>
+                </div>
+            </t>
+    </t>
+
+    <t t-name="odoo_ai_agent.Apps">
+        <div class="o-ai-agent-apps d-flex flex-wrap gap-2">
+            <button t-foreach="props.block.apps" t-as="app" t-key="app.menu_id" type="button"
+                    class="o-ai-agent-app btn btn-light border d-flex align-items-center gap-2 text-start"
+                    t-att-title="app.path" t-on-click="() => this.open(app)">
+                <img t-if="app.icon" t-att-src="app.icon" class="o-ai-agent-appIcon rounded" t-att-alt="app.app"/>
+                <i t-else="" class="fa fa-th-large fa-2x text-muted"/>
+                <span class="d-flex flex-column">
+                    <span class="fw-bold" t-esc="app.app"/>
+                    <span t-if="app.path !== app.app" class="small text-muted" t-esc="app.path"/>
+                </span>
+                <i class="oi oi-arrow-right ms-2 text-muted"/>
+            </button>
+        </div>
+    </t>
+
+    <t t-name="odoo_ai_agent.BlockExport">
+        <div class="btn-group btn-group-sm o-ai-agent-export">
+            <button class="btn btn-light" title="Export to Excel" t-on-click="() => this.export('xlsx')"><i class="fa fa-file-excel-o"/></button>
+            <button class="btn btn-light" title="Export to PDF" t-on-click="() => this.export('pdf')"><i class="fa fa-file-pdf-o"/></button>
+        </div>
+    </t>
+
+    <t t-name="odoo_ai_agent.Table">
+        <div class="o-ai-agent-card">
+            <div class="o-ai-agent-cardHeader">
+                <i class="fa fa-table me-2 text-muted"/>
+                <span class="fw-bold text-truncate" t-esc="props.block.title"/>
+                <span class="text-muted ms-2 text-nowrap small">
+                    <t t-if="props.block.grouped"><t t-esc="props.block.rows.length"/> groups</t>
+                    <t t-elif="props.block.total > props.block.rows.length"><t t-esc="props.block.rows.length"/> of <t t-esc="props.block.total"/></t>
+                    <t t-else=""><t t-esc="props.block.rows.length"/> records</t>
+                </span>
+                <div class="ms-auto d-flex gap-1">
+                    <button t-if="canOpen" class="btn btn-sm btn-light" title="Open the full list in Odoo" t-on-click="openAll"><i class="fa fa-external-link"/></button>
+                    <BlockExport t-if="props.block.rows.length" message="props.message" block="props.block"/>
+                </div>
+            </div>
+            <div t-if="props.block.subtitle" class="o-ai-agent-cardScope" t-esc="props.block.subtitle"/>
+            <div t-if="!props.block.rows.length" class="o-ai-agent-cardBody text-muted">No records found.</div>
+            <div t-else="" class="o-ai-agent-tableWrap">
+                <table class="table table-sm table-hover mb-0 o-ai-agent-table">
+                    <thead>
+                        <tr>
+                            <th t-foreach="props.block.columns" t-as="column" t-key="column.name" t-att-class="{ 'text-end': isNumeric(column) }" t-esc="column.label"/>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <t t-foreach="rows" t-as="row" t-key="row_index">
+                            <tr t-att-class="{ 'cursor-pointer': (canOpen and row.id) or canDrill(row), 'o-ai-agent-drillOpen': state.drill[row_index] }" t-att-title="canDrill(row) ? 'Show the records' : undefined" t-on-click="() => this.onRowClick(row, row_index)">
+                                <td t-foreach="props.block.columns" t-as="column" t-key="column.name" t-att-class="{ 'text-end text-nowrap': isNumeric(column) }">
+                                    <i t-if="column_first and canDrill(row)" class="fa fa-fw text-muted me-1" t-att-class="state.drill[row_index] ? 'fa-caret-down' : 'fa-caret-right'"/>
+                                    <t t-esc="cell(row, column)"/>
+                                </td>
+                            </tr>
+                            <tr t-if="state.drill[row_index]" class="o-ai-agent-drill">
+                                <td t-att-colspan="props.block.columns.length">
+                                    <div class="d-flex flex-wrap gap-1 align-items-center">
+                                        <span t-if="!state.drill[row_index].records.length" class="text-muted">No records you can access.</span>
+                                        <a t-foreach="state.drill[row_index].records" t-as="record" t-key="record.id" href="#" class="badge text-bg-light border text-decoration-none" t-on-click.prevent.stop="() => this.openDrillRecord(record)" t-esc="record.display_name"/>
+                                        <a href="#" class="small ms-2" t-on-click.prevent.stop="() => this.openDrillAll(state.drill[row_index].domain)">
+                                            <t t-if="state.drill[row_index].more">Open all in Odoo</t><t t-else="">Open in Odoo</t>
+                                        </a>
+                                    </div>
+                                </td>
+                            </tr>
+                        </t>
+                    </tbody>
+                </table>
+            </div>
+            <div t-if="hiddenCount > 0 or (canOpen and props.block.total > props.block.rows.length)" class="o-ai-agent-cardFooter">
+                <button t-if="hiddenCount > 0" class="btn btn-link btn-sm p-0" t-on-click="() => state.expanded = true">Show <t t-esc="hiddenCount"/> more</button>
+                <button t-if="canOpen and props.block.total > props.block.rows.length" class="btn btn-link btn-sm p-0 ms-auto" t-on-click="openAll">Open all <t t-esc="props.block.total"/> in Odoo</button>
+            </div>
+        </div>
+    </t>
+
+    <t t-name="odoo_ai_agent.Record">
+        <div class="o-ai-agent-card">
+            <div class="o-ai-agent-cardHeader">
+                <i class="fa fa-id-card-o me-2 text-muted"/>
+                <span class="fw-bold text-truncate" t-esc="props.block.display_name"/>
+                <span class="text-muted ms-2 small text-nowrap" t-esc="props.block.model_label"/>
+                <div class="ms-auto d-flex gap-1">
+                    <button class="btn btn-sm btn-light" title="Open in Odoo" t-on-click="open"><i class="fa fa-external-link"/></button>
+                    <BlockExport message="props.message" block="props.block"/>
+                </div>
+            </div>
+            <dl class="o-ai-agent-cardBody o-ai-agent-fields mb-0">
+                <t t-foreach="fields" t-as="field" t-key="field.name">
+                    <dt class="text-muted fw-normal" t-esc="field.label"/>
+                    <dd class="mb-0" t-esc="field.text"/>
+                </t>
+            </dl>
+        </div>
+    </t>
+
+    <t t-name="odoo_ai_agent.Chart">
+        <div class="o-ai-agent-card o-ai-agent-chart" t-ref="root">
+            <div class="o-ai-agent-cardHeader flex-wrap">
+                <i class="fa fa-bar-chart me-2 text-muted"/>
+                <span class="fw-bold text-truncate" t-esc="props.block.title"/>
+                <div class="ms-auto d-flex flex-wrap gap-1">
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn" t-att-class="state.view === 'graph' ? 'btn-secondary active' : 'btn-light'" title="Chart" t-on-click="() => this.setView('graph')"><i class="fa fa-bar-chart"/></button>
+                        <button class="btn" t-att-class="state.view === 'pivot' ? 'btn-secondary active' : 'btn-light'" title="Pivot table" t-on-click="() => this.setView('pivot')"><i class="fa fa-table"/></button>
+                    </div>
+                    <button class="btn btn-sm btn-light" title="Open in Odoo" t-on-click="openInOdoo"><i class="fa fa-external-link"/></button>
+                    <BlockExport message="props.message" block="props.block" getImage.bind="getImage"/>
+                </div>
+            </div>
+            <div t-if="props.block.subtitle" class="o-ai-agent-cardScope" t-esc="props.block.subtitle"/>
+            <div class="o-ai-agent-chartBody" t-att-class="{ 'o-ai-agent-pivot': state.view === 'pivot' }">
+                <div t-if="state.error" class="p-3 text-muted">This chart is not available to you.</div>
+                <View t-elif="state.fields" t-props="viewProps" t-key="state.view"/>
+            </div>
+            <div class="o-ai-agent-cardFooter text-muted small">
+                <t t-esc="props.block.measure_label"/> by <t t-esc="props.block.group_labels.join(' / ')"/> · <t t-esc="props.block.model_label"/>
+            </div>
+        </div>
+    </t>
+
+    <t t-name="odoo_ai_agent.Action">
+        <div class="o-ai-agent-card o-ai-agent-action" t-att-class="'o-ai-agent-action-' + props.block.status">
+            <div class="o-ai-agent-cardHeader">
+                <i class="fa fa-pencil-square-o me-2 text-muted"/>
+                <span class="fw-bold" t-esc="props.block.title"/>
+                <span class="ms-auto badge rounded-pill" t-att-class="{
+                    'text-bg-warning': props.block.status === 'pending' and !expired,
+                    'text-bg-success': props.block.status === 'done',
+                    'text-bg-secondary': ['cancelled', 'expired'].includes(props.block.status) or expired,
+                    'text-bg-danger': props.block.status === 'failed',
+                }">
+                    <t t-if="expired or props.block.status === 'expired'">Expired</t>
+                    <t t-elif="props.block.status === 'pending'">Waiting for your confirmation</t>
+                    <t t-elif="props.block.status === 'done'">Done</t>
+                    <t t-elif="props.block.status === 'cancelled'">Cancelled</t>
+                    <t t-else="">Failed</t>
+                </span>
+            </div>
+            <div class="o-ai-agent-cardBody">
+                <div t-if="props.block.records.length" class="mb-2">
+                    <span class="text-muted">On: </span>
+                    <t t-foreach="props.block.records" t-as="record" t-key="record.id">
+                        <span class="badge text-bg-light border me-1" t-esc="record.name"/>
+                    </t>
+                </div>
+                <table t-if="props.block.lines.length" class="table table-sm mb-0 o-ai-agent-preview">
+                    <tbody>
+                        <tr t-foreach="props.block.lines" t-as="line" t-key="line_index">
+                            <td class="text-muted w-33" t-esc="line.label"/>
+                            <td class="fw-semibold" t-esc="line.value"/>
+                        </tr>
+                    </tbody>
+                </table>
+                <div t-if="props.block.result and props.block.status !== 'pending'" class="mt-2 small" t-att-class="props.block.status === 'failed' ? 'text-danger' : 'text-muted'" t-esc="props.block.result"/>
+            </div>
+            <div class="o-ai-agent-cardFooter">
+                <t t-if="props.block.status === 'pending' and !expired">
+                    <button class="btn btn-primary btn-sm" t-att-disabled="state.busy" t-on-click="() => this.decide(true)">
+                        <i t-if="state.busy" class="fa fa-circle-o-notch fa-spin me-1"/>Confirm
+                    </button>
+                    <button class="btn btn-secondary btn-sm" t-att-disabled="state.busy" t-on-click="() => this.decide(false)">Cancel</button>
+                    <span class="text-muted small ms-auto">Nothing changes until you confirm.</span>
+                </t>
+                <button t-elif="props.block.status === 'done' and props.block.result_ids?.length" class="btn btn-link btn-sm p-0" t-on-click="openResult">
+                    Please click here to view your changes
+                </button>
+            </div>
+        </div>
+    </t>
+</templates>

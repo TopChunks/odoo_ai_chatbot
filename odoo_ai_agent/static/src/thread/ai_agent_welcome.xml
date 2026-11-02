@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-name="odoo_ai_agent.Welcome">
+        <div class="o-ai-agent-welcome d-flex flex-column w-100 h-100">
+            <div t-if="state.previous and !state.hideBanner" class="o-ai-agent-resume alert alert-info d-flex align-items-center rounded-0 mb-0 py-2 px-3">
+                <span class="me-1">New chat started.</span>
+                <a href="#" class="fw-semibold" t-on-click.prevent="resume">Resume previous chat <i class="oi oi-chevron-right small"/></a>
+                <button class="btn btn-link btn-sm ms-auto p-0 text-reset" title="Close" t-on-click="() => state.hideBanner = true"><i class="oi oi-close"/></button>
+            </div>
+            <div class="flex-grow-1 d-flex flex-column justify-content-center px-4 py-3 o-ai-agent-hero">
+                <div class="d-flex align-items-center gap-3 mb-2">
+                    <img t-att-src="iconUrl" class="o-ai-agent-heroIcon" alt=""/>
+                    <h2 class="mb-0 fw-semibold">AI Agent</h2>
+                </div>
+                <p class="text-muted mb-3">Ask about your Odoo apps, explore your data with tables and charts, and prepare changes you confirm.</p>
+                <div class="d-flex flex-column align-items-start gap-2">
+                    <button t-foreach="state.suggestions" t-as="suggestion" t-key="suggestion_index" class="btn btn-light border o-ai-agent-chip text-start" t-on-click="() => this.ask(suggestion)" t-esc="suggestion"/>
+                </div>
+            </div>
+        </div>
+    </t>
+
+    <t t-name="odoo_ai_agent.Thinking">
+        <div class="o-ai-agent-thinking d-flex align-items-start gap-2 px-2 py-2">
+            <img t-att-src="iconUrl" class="o-ai-agent-thinkingAvatar rounded" alt=""/>
+            <div class="o-ai-agent-thinkingBubble d-flex align-items-center gap-2">
+                <span class="o-ai-agent-dots" aria-hidden="true"><span/><span/><span/></span>
+                <span class="text-muted small" t-esc="props.thread.aiAgentStatus"/>
+            </div>
+        </div>
+    </t>
+
+    <t t-inherit="mail.Thread" t-inherit-mode="extension">
+        <!-- Live "thinking" line under the last message while the AI prepares its answer. -->
+        <xpath expr="//t[@t-foreach='messages']" position="after">
+            <AiAgentThinking t-if="props.thread.aiAgentPending" thread="props.thread"/>
+        </xpath>
+        <!-- Welcome screen of an empty AI conversation, instead of "The conversation is empty". -->
+        <xpath expr="//t[@name='empty-message']" position="attributes">
+            <attribute name="t-if">!props.thread.isAiAgent</attribute>
+        </xpath>
+        <xpath expr="//t[@name='empty-message']" position="after">
+            <AiAgentWelcome t-if="props.thread.isAiAgent" thread="props.thread"/>
+        </xpath>
+    </t>
+</templates>

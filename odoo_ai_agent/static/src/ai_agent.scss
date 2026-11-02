@@ -1,0 +1,429 @@
+// AI glyph as a mask: takes the text color, so it works wherever an icon class goes.
+.o-ai-agent-glyph {
+    display: inline-block;
+    &::before {
+        content: "";
+        display: inline-block;
+        width: 1.15em;
+        height: 1.15em;
+        vertical-align: -0.2em;
+        background-color: currentColor;
+        -webkit-mask: url("/odoo_ai_agent/static/img/glyph.svg") center / contain no-repeat;
+        mask: url("/odoo_ai_agent/static/img/glyph.svg") center / contain no-repeat;
+    }
+}
+
+// Top bar
+.o-ai-agent-systray {
+    .o-ai-agent-systray-icon {
+        font-size: 1.25rem;
+        color: #fff;
+        opacity: 0.95;
+        transition: transform 0.15s ease;
+    }
+    button:hover .o-ai-agent-systray-icon {
+        transform: scale(1.1);
+        opacity: 1;
+    }
+    .o-ai-agent-opening {
+        animation: o-ai-agent-pulse 0.9s ease-in-out infinite;
+    }
+}
+
+@keyframes o-ai-agent-pulse {
+    50% {
+        opacity: 0.45;
+    }
+}
+
+// Discuss sidebar and messaging menu
+.o-ai-agent-category .o-ai-agent-glyph::before {
+    width: 1em;
+    height: 1em;
+}
+.o-mail-MessagingMenu-tabIcon.o-ai-agent-glyph::before {
+    width: 1.1em;
+    height: 1.1em;
+}
+
+// Blocks under AI answers
+.o-mail-Message-content:has(.o-ai-agent-blocks) {
+    flex-grow: 1;
+    width: 100%;
+}
+
+.o-ai-agent-blocks {
+    width: 100%;
+    max-width: 920px;
+}
+
+.o-ai-agent-card {
+    border: 1px solid $border-color;
+    border-radius: 0.6rem;
+    background-color: $o-view-background-color;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.o-ai-agent-cardHeader {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.45rem 0.75rem;
+    border-bottom: 1px solid $border-color;
+    background-color: rgba($o-gray-100, 0.6);
+    min-width: 0;
+}
+
+.o-ai-agent-cardBody {
+    padding: 0.6rem 0.75rem;
+}
+
+.o-ai-agent-cardFooter {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.75rem;
+    border-top: 1px solid $border-color;
+    &:empty {
+        display: none;
+    }
+}
+
+.o-ai-agent-tableWrap {
+    max-height: 420px;
+    overflow: auto;
+}
+
+.o-ai-agent-table {
+    font-size: 0.9em;
+    th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background-color: $o-view-background-color;
+        white-space: nowrap;
+        font-weight: 600;
+    }
+    td,
+    th {
+        padding: 0.35rem 0.6rem;
+    }
+    td {
+        max-width: 320px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+}
+
+.o-ai-agent-fields {
+    display: grid;
+    grid-template-columns: minmax(110px, max-content) 1fr;
+    gap: 0.25rem 1rem;
+    dd {
+        overflow-wrap: anywhere;
+    }
+}
+
+.o-ai-agent-pre {
+    white-space: pre-wrap;
+    font-size: 0.85em;
+    max-height: 320px;
+    overflow: auto;
+}
+
+// Native Odoo graph / pivot inside a chat bubble
+.o-ai-agent-chartBody {
+    position: relative;
+    &.o-ai-agent-pivot {
+        max-height: 460px;
+        overflow: auto;
+    }
+    .o-ai-agent-chartView {
+        height: auto;
+        min-height: 0;
+        .o_content {
+            overflow: visible;
+        }
+    }
+    .o_graph_renderer {
+        padding: 0.5rem 0.75rem 0.25rem;
+    }
+    .o_graph_view .o_graph_canvas_container,
+    .o_graph_canvas_container {
+        min-height: 0;
+        height: 300px;
+    }
+}
+
+.o-ai-agent-action-pending {
+    border-color: $warning;
+}
+.o-ai-agent-action-done {
+    border-color: $success;
+}
+.o-ai-agent-action-failed {
+    border-color: $danger;
+}
+
+.o-ai-agent-steps {
+    padding-left: 1.4rem;
+    .o-ai-agent-stepDetail {
+        margin-left: 1.3rem;
+        font-size: 0.9em;
+    }
+}
+
+.o-ai-agent-footer .o-ai-agent-feedback .btn {
+    line-height: 1.2;
+}
+
+// Empty conversation
+.o-mail-Thread-empty:has(.o-ai-agent-welcome) {
+    opacity: 1 !important;
+    padding: 0 !important;
+    align-items: stretch !important;
+    justify-content: stretch !important;
+}
+
+.o-ai-agent-heroIcon {
+    width: 3rem;
+    height: 3rem;
+    border-radius: 0.75rem;
+}
+
+.o-ai-agent-chip {
+    border-radius: 1rem;
+    padding: 0.35rem 0.9rem;
+    font-weight: 500;
+}
+
+// "Thinking…"
+.o-ai-agent-thinkingAvatar {
+    width: 2rem;
+    height: 2rem;
+}
+
+.o-ai-agent-thinkingBubble {
+    padding: 0.4rem 0.75rem;
+    border-radius: 1rem;
+    background-color: rgba($o-gray-200, 0.7);
+}
+
+.o-ai-agent-dots {
+    display: inline-flex;
+    gap: 3px;
+    span {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background-color: $o-gray-600;
+        animation: o-ai-agent-bounce 1.2s infinite ease-in-out;
+        &:nth-child(2) {
+            animation-delay: 0.15s;
+        }
+        &:nth-child(3) {
+            animation-delay: 0.3s;
+        }
+    }
+}
+
+@keyframes o-ai-agent-bounce {
+    0%,
+    80%,
+    100% {
+        transform: translateY(0);
+        opacity: 0.4;
+    }
+    40% {
+        transform: translateY(-4px);
+        opacity: 1;
+    }
+}
+
+// Usage dashboard
+.o-ai-dash {
+    background-color: $o-webclient-background-color;
+}
+
+.o-ai-dash-inner {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 1.25rem 1.5rem 2rem;
+}
+
+.o-ai-dash-card {
+    background-color: $o-view-background-color;
+    border: 1px solid $border-color;
+    border-radius: 0.75rem;
+    padding: 1rem 1.1rem;
+    h5 {
+        font-size: 0.95rem;
+        font-weight: 600;
+        margin-bottom: 0.75rem;
+    }
+}
+
+.o-ai-dash-kpis {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 0.75rem;
+}
+
+.o-ai-dash-kpiValue {
+    font-size: 1.6rem;
+    font-weight: 700;
+    line-height: 1.2;
+    margin-bottom: 0.15rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.o-ai-dash-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+    gap: 0.75rem;
+}
+
+.o-ai-dash-table {
+    font-variant-numeric: tabular-nums;
+    th {
+        white-space: nowrap;
+        font-weight: 600;
+        font-size: 0.85rem;
+    }
+}
+
+.o-ai-dash-avatar {
+    width: 26px;
+    height: 26px;
+    object-fit: cover;
+}
+
+.o-ai-dash-progress {
+    width: 70px;
+    height: 6px;
+}
+
+// Conversation list next to the chat (Discuss and the AI Agent app)
+.o-ai-agent-list {
+    width: 320px;
+    background-color: $o-view-background-color;
+}
+
+.o-ai-agent-listTabs .btn {
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    &.o-active {
+        border-bottom-color: $o-action;
+    }
+}
+
+.o-ai-agent-listItem {
+    &:hover,
+    &.o-active {
+        background-color: rgba($o-gray-200, 0.7);
+    }
+    .o-ai-agent-listActions {
+        display: none;
+    }
+    &:hover {
+        .o-ai-agent-listActions {
+            display: inline;
+        }
+        .o-ai-agent-listTime {
+            display: none;
+        }
+    }
+}
+
+.o-ai-agent-listIcon {
+    width: 2rem;
+    height: 2rem;
+}
+
+.o-ai-agent-listPreview {
+    max-height: 1.5em;
+    > * {
+        display: inline;
+    }
+}
+
+// Conversation history block
+.o-ai-agent-history {
+    max-height: 420px;
+    overflow: auto;
+    padding: 0.5rem 0.75rem;
+}
+
+.o-ai-agent-historyRecord + .o-ai-agent-historyRecord {
+    border-top: 1px solid $border-color;
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+}
+
+.o-ai-agent-historyItem {
+    border-left: 2px solid $border-color;
+    padding: 0.15rem 0 0.35rem 0.6rem;
+    margin-left: 0.25rem;
+}
+
+.o-ai-agent-historyText {
+    white-space: pre-wrap;
+    font-size: 0.9em;
+}
+
+// Intermediate results the AI did not present
+.o-ai-agent-dataUsedList {
+    padding-left: 0.75rem;
+    border-left: 2px solid $border-color;
+}
+
+// Tables the AI writes in its own text
+.o-mail-Message-richBody table {
+    border-collapse: collapse;
+    margin: 0.25rem 0;
+    th,
+    td {
+        border: 1px solid $border-color;
+        padding: 0.2rem 0.5rem;
+    }
+    th {
+        background-color: rgba($o-gray-100, 0.8);
+    }
+}
+
+// What a result covers (filters, period, top N), written by Odoo
+.o-ai-agent-cardScope {
+    padding: 0.3rem 0.75rem;
+    font-size: 0.85em;
+    color: $text-muted;
+    border-bottom: 1px solid $border-color;
+}
+
+// Records behind a grouped row
+.o-ai-agent-drill td {
+    background-color: rgba($o-gray-100, 0.7);
+    white-space: normal !important;
+    max-width: none !important;
+}
+
+// Model choice in the conversation header; narrower in a chat window to keep its title readable.
+.o-ai-agent-modelPicker {
+    max-width: 14rem;
+
+    .o-mail-ChatWindow & {
+        max-width: 9.5rem;
+    }
+}
+
+// App cards: the app's own icon, clickable.
+.o-ai-agent-app {
+    max-width: 100%;
+
+    .o-ai-agent-appIcon {
+        width: 2.5rem;
+        height: 2.5rem;
+        object-fit: contain;
+    }
+}

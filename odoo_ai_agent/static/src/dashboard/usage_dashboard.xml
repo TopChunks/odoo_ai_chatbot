@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-name="odoo_ai_agent.DashboardChart">
+        <div class="position-relative" t-att-style="'height: ' + (props.height or 260) + 'px'">
+            <canvas t-ref="canvas"/>
+        </div>
+    </t>
+
+    <t t-name="odoo_ai_agent.UsageDashboard">
+        <div class="o_action o-ai-dash h-100 overflow-auto">
+            <div class="o-ai-dash-inner">
+                <div class="o-ai-dash-head d-flex flex-wrap align-items-center gap-3 mb-3">
+                    <div>
+                        <h2 class="mb-0">AI Usage &amp; Cost</h2>
+                        <div class="text-muted small" t-if="state.data">
+                            <t t-esc="state.data.period.start.slice(0, 10)"/> → <t t-esc="state.data.period.end.slice(0, 10)"/> · costs in US dollars, as billed by the providers
+                        </div>
+                    </div>
+                    <div class="ms-auto d-flex flex-wrap align-items-center gap-2">
+                        <div class="btn-group btn-group-sm" role="group" aria-label="Period">
+                            <button t-foreach="periods" t-as="period" t-key="period.days" class="btn" t-att-class="state.days === period.days ? 'btn-primary' : 'btn-light border'" t-on-click="() => this.setPeriod(period.days)" t-esc="period.label"/>
+                        </div>
+                        <t t-if="state.data">
+                            <select class="form-select form-select-sm w-auto" t-on-change="(ev) => this.setFilter('provider_id', ev.target.value)">
+                                <option value="">All providers</option>
+                                <option t-foreach="state.data.filters.providers" t-as="p" t-key="p.id" t-att-value="p.id" t-att-selected="state.provider_id === p.id" t-esc="p.name"/>
+                            </select>
+                            <select class="form-select form-select-sm w-auto" t-on-change="(ev) => this.setFilter('model_id', ev.target.value)">
+                                <option value="">All models</option>
+                                <option t-foreach="state.data.filters.models" t-as="m" t-key="m.id" t-att-value="m.id" t-att-selected="state.model_id === m.id" t-esc="m.name"/>
+                            </select>
+                            <select class="form-select form-select-sm w-auto" t-on-change="(ev) => this.setFilter('user_id', ev.target.value)">
+                                <option value="">All users</option>
+                                <option t-foreach="state.data.filters.users" t-as="u" t-key="u.id" t-att-value="u.id" t-att-selected="state.user_id === u.id" t-esc="u.name"/>
+                            </select>
+                        </t>
+                        <button class="btn btn-sm btn-secondary" t-on-click="() => this.openAnalysis()"><i class="fa fa-table me-1"/>Usage analysis</button>
+                    </div>
+                </div>
+
+                <t t-if="state.data">
+                    <div t-att-class="{ 'opacity-50': state.loading }">
+                        <div class="o-ai-dash-kpis mb-3">
+                            <div t-foreach="kpis" t-as="kpi" t-key="kpi_index" class="o-ai-dash-card o-ai-dash-kpi">
+                                <div class="d-flex align-items-center text-muted small mb-1">
+                                    <i class="fa fa-fw me-1" t-att-class="kpi.icon"/><t t-esc="kpi.label"/>
+                                </div>
+                                <div class="o-ai-dash-kpiValue" t-esc="kpi.value"/>
+                                <div class="small d-flex flex-wrap gap-2">
+                                    <span t-if="kpi.delta" t-att-class="kpi.good ? (kpi.delta.up ? 'text-success' : 'text-danger') : 'text-muted'">
+                                        <i class="fa" t-att-class="kpi.delta.up ? 'fa-arrow-up' : 'fa-arrow-down'"/> <t t-esc="kpi.delta.text"/> vs previous
+                                    </span>
+                                    <span t-elif="!kpi.hint" class="text-muted">No earlier data</span>
+                                    <span t-if="kpi.hint" class="text-muted" t-esc="kpi.hint"/>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div t-if="!state.data.kpis.questions" class="o-ai-dash-card text-center py-5 mb-3">
+                            <div class="fs-4 mb-1">No AI usage in this period yet</div>
+                            <div class="text-muted">Every question your users ask the AI Agent appears here, with its tokens and cost.</div>
+                        </div>
+                        <t t-else="">
+                            <div class="o-ai-dash-grid mb-3">
+                                <div class="o-ai-dash-card">
+                                    <h5>Cost per day</h5>
+                                    <DashboardChart config="charts.cost"/>
+                                </div>
+                                <div class="o-ai-dash-card">
+                                    <h5>Tokens per day</h5>
+                                    <DashboardChart config="charts.tokens"/>
+                                </div>
+                                <div class="o-ai-dash-card">
+                                    <h5>Cost by AI model</h5>
+                                    <DashboardChart config="charts.models"/>
+                                </div>
+                                <div class="o-ai-dash-card">
+                                    <h5>Tokens by provider</h5>
+                                    <DashboardChart config="charts.providers"/>
+                                </div>
+                                <div class="o-ai-dash-card">
+                                    <h5>Who spends the most tokens</h5>
+                                    <DashboardChart config="charts.users"/>
+                                </div>
+                                <div class="o-ai-dash-card">
+                                    <h5>When people ask (your timezone)</h5>
+                                    <DashboardChart config="charts.hours"/>
+                                </div>
+                            </div>
+
+                            <div class="o-ai-dash-card mb-3">
+                                <div class="d-flex align-items-center mb-2">
+                                    <h5 class="mb-0">Who uses the AI Agent most efficiently</h5>
+                                    <i class="fa fa-info-circle text-muted ms-2" data-tooltip="Efficiency (0-100) combines the share of questions answered (50%), tokens per answer compared to the team's median (35%) and 👍 feedback (15%; the answer rate counts instead when there are no votes)."/>
+                                </div>
+                                <div class="table-responsive">
+                                    <table class="table table-hover align-middle mb-0 o-ai-dash-table">
+                                        <thead>
+                                            <tr>
+                                                <th>#</th>
+                                                <th>User</th>
+                                                <th class="text-end cursor-pointer" t-on-click="() => this.sortBy('efficiency')">Efficiency <i t-att-class="sortIcon('efficiency')"/></th>
+                                                <th class="text-end cursor-pointer" t-on-click="() => this.sortBy('questions')">Questions <i t-att-class="sortIcon('questions')"/></th>
+                                                <th class="text-end cursor-pointer" t-on-click="() => this.sortBy('success_rate')">Answered <i t-att-class="sortIcon('success_rate')"/></th>
+                                                <th class="text-end cursor-pointer" t-on-click="() => this.sortBy('tokens')">Tokens <i t-att-class="sortIcon('tokens')"/></th>
+                                                <th class="text-end cursor-pointer" t-on-click="() => this.sortBy('tokens_per_answer')">Tokens / answer <i t-att-class="sortIcon('tokens_per_answer')"/></th>
+                                                <th class="text-end cursor-pointer" t-on-click="() => this.sortBy('cost')">Cost <i t-att-class="sortIcon('cost')"/></th>
+                                                <th class="text-end">👍 / 👎</th>
+                                                <th class="text-end cursor-pointer" t-on-click="() => this.sortBy('last_used')">Last used <i t-att-class="sortIcon('last_used')"/></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr t-foreach="leaderboard" t-as="user" t-key="user.id" class="cursor-pointer" t-on-click="() => this.openUser(user)">
+                                                <td class="text-muted" t-esc="user_index + 1"/>
+                                                <td>
+                                                    <img t-att-src="user.avatar" class="rounded o-ai-dash-avatar me-2" alt=""/>
+                                                    <span t-esc="user.name"/>
+                                                </td>
+                                                <td class="text-end">
+                                                    <div class="d-flex align-items-center justify-content-end gap-2">
+                                                        <div class="progress o-ai-dash-progress" role="progressbar" t-att-aria-valuenow="user.efficiency">
+                                                            <div class="progress-bar" t-att-class="efficiencyClass(user.efficiency)" t-att-style="'width: ' + user.efficiency + '%'"/>
+                                                        </div>
+                                                        <span class="fw-semibold" t-esc="user.efficiency"/>
+                                                    </div>
+                                                </td>
+                                                <td class="text-end" t-esc="user.questions"/>
+                                                <td class="text-end"><t t-esc="user.success_rate.toFixed(0)"/>%</td>
+                                                <td class="text-end" t-esc="formatCompact(user.tokens)"/>
+                                                <td class="text-end" t-esc="formatCompact(user.tokens_per_answer)"/>
+                                                <td class="text-end" t-esc="formatCost(user.cost)"/>
+                                                <td class="text-end text-muted"><t t-esc="user.feedback_up"/> / <t t-esc="user.feedback_down"/></td>
+                                                <td class="text-end text-muted small" t-esc="user.last_used.slice(0, 16)"/>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div class="o-ai-dash-grid mb-3">
+                                <div class="o-ai-dash-card">
+                                    <h5>Most used tools</h5>
+                                    <DashboardChart t-if="state.data.tools.length" config="charts.tools"/>
+                                    <div t-else="" class="text-muted">No tools used yet.</div>
+                                </div>
+                                <div class="o-ai-dash-card">
+                                    <h5>Recent failures</h5>
+                                    <div t-if="!state.data.errors.length" class="text-muted"><i class="fa fa-check-circle text-success me-1"/>No failed answers in this period.</div>
+                                    <ul t-else="" class="list-unstyled mb-0 o-ai-dash-errors">
+                                        <li t-foreach="state.data.errors" t-as="error" t-key="error_index" class="py-2 border-bottom">
+                                            <div class="small text-muted"><t t-esc="error.date.slice(0, 16)"/> · <t t-esc="error.user"/> · <t t-esc="error.model"/></div>
+                                            <div class="small" t-esc="error.message"/>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </t>
+                    </div>
+                </t>
+                <div t-else="" class="text-center text-muted py-5"><i class="fa fa-circle-o-notch fa-spin me-1"/>Loading…</div>
+            </div>
+        </div>
+    </t>
+</templates>

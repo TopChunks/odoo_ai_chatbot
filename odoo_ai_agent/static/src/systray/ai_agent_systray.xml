@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="odoo_ai_agent.Systray">
+        <div class="o-mail-DiscussSystray-class o-ai-agent-systray">
+            <button class="bg-transparent" type="button" data-tooltip="AI Agent" aria-label="AI Agent" t-on-click="onClick">
+                <i class="o-ai-agent-glyph o-ai-agent-systray-icon" role="img" t-att-class="{ 'o-ai-agent-opening': state.opening }"/>
+            </button>
+        </div>
+    </t>
+</templates>

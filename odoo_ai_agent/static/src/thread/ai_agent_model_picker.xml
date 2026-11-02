@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-name="odoo_ai_agent.ModelPicker">
+        <select t-if="state.models.length" class="o-ai-agent-modelPicker form-select form-select-sm w-auto flex-shrink-0"
+                t-att-title="title" t-att-aria-label="title" t-on-click.stop="" t-on-change="onChange">
+            <option t-foreach="state.models" t-as="model" t-key="model.id" t-att-value="model.id"
+                    t-att-selected="model.id === state.selected" t-esc="model.name"/>
+        </select>
+    </t>
+
+    <t t-inherit="mail.DiscussContent" t-inherit-mode="extension">
+        <xpath expr="//div[hasclass('o-mail-DiscussContent-header')]//div[hasclass('pe-3')][hasclass('flex-shrink-0')]" position="before">
+            <AiAgentModelPicker t-if="thread.isAiAgent" thread="thread"/>
+        </xpath>
+    </t>
+
+    <t t-inherit="mail.ChatWindow" t-inherit-mode="extension">
+        <xpath expr="//div[hasclass('o-mail-ChatWindow-header')]/div[hasclass('flex-shrink-0')][hasclass('me-1')]" position="before">
+            <AiAgentModelPicker t-if="thread?.isAiAgent and !ui.isSmall" thread="thread"/>
+        </xpath>
+    </t>
+
+</templates>

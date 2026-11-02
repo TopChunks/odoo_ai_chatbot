@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="ai_agent_provider_view_list" model="ir.ui.view">
+        <field name="name">ai_agent.provider.list</field>
+        <field name="model">ai_agent.provider</field>
+        <field name="arch" type="xml">
+            <list string="AI Providers" create="false">
+                <field name="sequence" widget="handle"/>
+                <field name="name"/>
+                <field name="code" optional="hide"/>
+                <field name="has_api_key" string="API key set" widget="boolean"/>
+                <field name="model_count" string="Models"/>
+                <field name="last_sync"/>
+                <button name="action_sync_models" type="object" string="Refresh models" icon="fa-refresh" class="btn-link"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="ai_agent_provider_view_form" model="ir.ui.view">
+        <field name="name">ai_agent.provider.form</field>
+        <field name="model">ai_agent.provider</field>
+        <field name="arch" type="xml">
+            <form string="AI Provider" create="false">
+                <header>
+                    <button name="action_sync_models" type="object" string="Refresh available models" class="btn-primary" icon="fa-refresh"/>
+                </header>
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button name="action_view_models" type="object" class="oe_stat_button" icon="fa-cubes">
+                            <field name="model_count" widget="statinfo" string="Models"/>
+                        </button>
+                    </div>
+                    <div class="oe_title">
+                        <h1><field name="name" readonly="1"/></h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="code" readonly="1"/>
+                            <field name="api_key" password="True" placeholder="Paste the provider's API key"/>
+                            <field name="api_key_url" widget="url" string="Get a key" readonly="1"/>
+                        </group>
+                        <group>
+                            <field name="last_sync"/>
+                            <field name="active" invisible="1"/>
+                        </group>
+                    </group>
+                    <div class="text-muted">
+                        Refreshing lists only current models that write text and can use Odoo's tools: deprecated,
+                        image, audio, video and embedding models are left out, and models the provider no longer
+                        offers are archived. Prices come from OpenRouter's public price list when the provider does
+                        not publish them; you can type your own on each model.
+                    </div>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="ai_agent_provider_action" model="ir.actions.act_window">
+        <field name="name">AI Providers</field>
+        <field name="res_model">ai_agent.provider</field>
+        <field name="view_mode">list,form</field>
+    </record>
+</odoo>

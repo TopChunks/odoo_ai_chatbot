@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="res_config_settings_view_form" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.inherit.odoo_ai_agent</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app data-string="AI Agent" string="AI Agent" name="odoo_ai_agent" logo="/odoo_ai_agent/static/description/icon.svg" groups="odoo_ai_agent.group_ai_agent_manager">
+                    <block title="AI Provider" name="ai_agent_provider">
+                        <setting string="AI Provider" help="The company whose AI answers your users: OpenAI, Google Gemini, Anthropic Claude or OpenRouter.">
+                            <field name="ai_agent_provider_id" options="{'no_create': True, 'no_open': True}"/>
+                        </setting>
+                        <setting string="API Key" help="Secret key from the provider's console. Readable by AI Agent administrators only." invisible="not ai_agent_provider_id">
+                            <field name="ai_agent_api_key" password="True" placeholder="Paste the API key"/>
+                            <div>
+                                <field name="ai_agent_api_key_url" widget="url" text="Get an API key" readonly="1" class="oe_link"/>
+                            </div>
+                        </setting>
+                        <setting string="AI Model" help="Current text models of this provider. Refresh after adding the key." invisible="not ai_agent_provider_id">
+                            <field name="ai_agent_model_id" options="{'no_create': True}" placeholder="Refresh, then choose a model"/>
+                            <div class="mt-2">
+                                <button name="action_ai_agent_sync_models" type="object" string="Refresh available models" icon="fa-refresh" class="btn-link p-0"/>
+                            </div>
+                        </setting>
+                    </block>
+                    <block title="Data and privacy" name="ai_agent_data">
+                        <setting string="MCP Server" help="The AI uses the MCP Server's tools, run inside Odoo with each user's own access rights.">
+                            <div invisible="not ai_agent_mcp_enabled" class="text-success">
+                                <i class="fa fa-check-circle"/> Switched on
+                            </div>
+                            <div invisible="ai_agent_mcp_enabled">
+                                <span class="text-danger"><i class="fa fa-exclamation-circle"/> Switched off: the AI cannot read data.</span>
+                                <button name="action_ai_agent_enable_mcp" type="object" string="Switch on" class="btn-link"/>
+                            </div>
+                        </setting>
+                        <setting string="Enabled MCP models" help="The kinds of Odoo records (models) the AI can work with, and what it may do on each: read, create, update, delete or press buttons.">
+                            <div><field name="ai_agent_mcp_model_count" class="fw-bold w-auto oe_inline"/> models enabled</div>
+                            <div class="text-muted small mt-1">
+                                Example: enable <b>Sales Order</b> with <i>Read</i>, and users can ask "Show my quotations from this month".
+                                Leave <b>Employee</b> off, and the AI answers that it is not enabled, even for administrators.
+                                Either way, each user only sees the records their own Odoo access rights allow.
+                            </div>
+                            <button name="mcp_server.action_mcp_enabled_models" type="action" string="Manage MCP models" icon="oi-arrow-right" class="btn-link p-0 mt-1"/>
+                        </setting>
+                        <setting id="ai_agent_share_data" help="Off (recommended): the AI receives tool definitions, record counts and IDs only; values are shown to the user, never sent to the provider. On: results are also sent so the AI can summarise them.">
+                            <field name="ai_agent_share_data"/>
+                        </setting>
+                        <setting string="User access" help="Each user needs AI Agent access: Settings > Users > Access Rights > AI Agent.">
+                            <button name="base.action_res_users" type="action" string="Users" icon="oi-arrow-right" class="btn-link p-0"/>
+                        </setting>
+                    </block>
+                    <block title="Limits" name="ai_agent_limits">
+                        <setting string="Tool steps per answer" help="How many tool calls the AI may chain for one answer (1-25).">
+                            <field name="ai_agent_max_steps"/>
+                        </setting>
+                        <setting string="Answer length" help="Maximum tokens the AI writes per step (256-65,536).">
+                            <field name="ai_agent_max_output_tokens"/>
+                        </setting>
+                        <setting string="Provider timeout" help="Seconds to wait for the provider on each call (10-600).">
+                            <field name="ai_agent_timeout"/>
+                        </setting>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="ai_agent_settings_action" model="ir.actions.act_window">
+        <field name="name">Settings</field>
+        <field name="res_model">res.config.settings</field>
+        <field name="view_mode">form</field>
+        <field name="target">current</field>
+        <field name="context">{'module': 'odoo_ai_agent', 'bin_size': False}</field>
+    </record>
+</odoo>
