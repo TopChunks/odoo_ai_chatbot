@@ -69,8 +69,8 @@
                         </div>
                     </div>
                 </div>
-                <div t-elif="block.type === 'notice'" class="alert alert-warning d-flex gap-2 align-items-start mb-0 py-2" role="status">
-                    <i class="fa fa-lock mt-1"/><span t-esc="block.text"/>
+                <div t-elif="block.type === 'notice'" t-attf-class="alert {{ block.level === 'info' ? 'alert-info' : 'alert-warning' }} d-flex gap-2 align-items-start mb-0 py-2" role="status">
+                    <i t-attf-class="fa {{ block.level === 'info' ? 'fa-info-circle' : 'fa-lock' }} mt-1"/><span t-esc="block.text"/>
                 </div>
                 <div t-elif="block.type === 'text'" class="o-ai-agent-card">
                     <div class="o-ai-agent-cardBody"><pre class="mb-0 o-ai-agent-pre" t-esc="block.text"/></div>

@@ -13,6 +13,7 @@ DEFAULT_MODELS = {
     "sale.order": {"allow_method_calls": True},
     "sale.order.line": {},
     "account.move": {},
+    "account.move.line": {},
     "product.product": {},
     "product.template": {},
     "product.category": {},
