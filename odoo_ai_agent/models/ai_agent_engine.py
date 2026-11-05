@@ -299,6 +299,7 @@ HANDBACK = re.compile(r"\s*[^.!?\n]*(?:\bI can(?:'|no)t name\b|\b(?:check|look a
                       r"\bto (?:find|see|spot)\b|\b(?:calculated|computed)\b[^.!?\n]*\b(?:isn't|is not|wasn't|not) "
                       r"shown\b)[^.!?\n]*[.!?]", re.IGNORECASE)
 COMPARE_INTENT = re.compile(r"\b(?:compare|comparison|versus|vs\.?|difference between)\b", re.IGNORECASE)
+CHART_INTENT = re.compile(r"\b(?:chart|graph|plot|visuali[sz]ation|visuali[sz]e)\b", re.IGNORECASE)
 HIGHLIGHT_CLAIM = re.compile(r"\bhighlight", re.IGNORECASE)
 # "Which product sold the most?", "lowest price", "top 5 customers": Odoo names the top row.
 SUPERLATIVE = re.compile(r"(?<!\bat )\b(?:most(?! recent)(?! recently)|top(?! of)|best|highest|largest|biggest|"
@@ -897,6 +898,7 @@ STYLE
             )
             self._add_usage(state, reply, model)
             text = reply["text"] or text
+        self._auto_present_chart(state)
         if text or not state["steps"]:
             return text
         return _("I couldn't finish this answer. The results I found are below; try asking in a simpler way.")
@@ -2420,12 +2422,20 @@ STYLE
     def _tool_present(self, arguments, state):
         """Build what the user sees from named results, in Odoo; the AI only gives names and labels."""
         results = state.get("results", {})
+        chart_requested = bool(CHART_INTENT.search(state.get("question") or ""))
         items = [item for item in arguments.get("items") or [] if isinstance(item, dict)]
         if not items:
             raise UserError(_("items needs at least one result to show."))
         shown, notes = [], []
         for item in items:
             view = item.get("view") or "table"
+            if chart_requested and view == "table":
+                ref = item.get("result")
+                source = results.get(ref) if ref else None
+                combined = [results.get(r) for r in item.get("combine") or []]
+                if ((source and source.get("grouped") and source.get("spec"))
+                        or (combined and all(r and r.get("grouped") and r.get("spec") for r in combined))):
+                    view = "bar"
             labels = {str(k).lower(): str(v) for k, v in (item.get("labels") or {}).items() if v}
             again = json.dumps([item.get("result"), item.get("combine"), item.get("view") or "table"], default=str)
             if again in state.setdefault("presented_items", []):
@@ -2440,6 +2450,11 @@ STYLE
                                                        item.get("measure"))
                 if block is None:
                     block = self._present_combine(item["combine"], results, labels, item.get("title"))
+                    specs = [results.get(ref, {}).get("spec") or {} for ref in item["combine"]]
+                    if chart_requested and any(
+                            "." in group.split(":")[0] for spec in specs for group in spec.get("groupby") or []):
+                        notes.append(_("This grouping uses a related field that Odoo's native charts cannot draw, "
+                                       "so the comparison is shown as a table."))
             else:
                 ref = item.get("result")
                 if ref not in results:
@@ -2476,6 +2491,27 @@ STYLE
         state["presented"] = True
         return ("Shown to the user, below your text: " + "; ".join(shown) + ". Do not repeat these tables in your text."
                 + "".join(" " + note for note in notes))
+
+    @api.model
+    def _auto_present_chart(self, state):
+        """Weak models sometimes finish after computing a grouped result without calling present."""
+        if not CHART_INTENT.search(state.get("question") or "") or state.get("presented"):
+            return False
+        if any(block.get("type") == "chart" for block in state.get("blocks", [])):
+            return False
+        results = state.get("results") or {}
+        candidates = [(ref, result) for ref, result in results.items()
+                      if result.get("type") == "table" and result.get("grouped") and result.get("spec")]
+        if not candidates:
+            return False
+        item = {"result": candidates[-1][0], "view": "bar"}
+        if COMPARE_INTENT.search(state.get("question") or "") and len(candidates) >= 2:
+            previous, latest = candidates[-2:]
+            left, right = previous[1]["spec"], latest[1]["spec"]
+            if left.get("model") == right.get("model") and left.get("groupby") == right.get("groupby"):
+                item = {"combine": [previous[0], latest[0]], "view": "bar"}
+        self._tool_present({"items": [item]}, state)
+        return True
 
     # ------------------------------------------------------------------
     # Calculations: the AI writes the formula, Odoo computes it on values the AI never sees
