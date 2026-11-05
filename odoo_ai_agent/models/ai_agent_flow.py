@@ -30,6 +30,10 @@ MAX_INDEX_CHUNKS = 8000
 MAX_FILE_BYTES = 256_000
 CHUNK_LINES = 32
 CHUNK_CHARS = 2200
+QUERY_STOPWORDS = {
+    "how", "does", "our", "custom", "process", "work", "works", "what", "which", "is", "are", "the",
+    "this", "that", "in", "of", "for", "as", "me", "tell", "please", "explain", "show", "your",
+}
 
 
 def redact_secrets(text):
@@ -185,7 +189,17 @@ class AiAgentFlowIndex(models.Model):
                 or self.env["ir.config_parameter"].sudo().get_param(
                     "odoo_ai_agent.business_flow_enabled") not in ("True", "1", "true")):
             raise AccessError(_("Custom business-flow search is disabled or you do not have AI Agent access."))
-        terms = list(dict.fromkeys(re.findall(r"[\w.-]{3,}", (query or "").lower())))[:8]
+        raw_terms = list(dict.fromkeys(re.findall(r"[\w.-]{3,}", (query or "").lower())))[:8]
+        terms = []
+        for term in raw_terms:
+            if term in QUERY_STOPWORDS:
+                continue
+            terms.append(term)
+            if term.endswith("ies") and len(term) > 5:
+                terms.append(term[:-3] + "y")
+            elif term.endswith("s") and len(term) > 4:
+                terms.append(term[:-1])
+        terms = list(dict.fromkeys(terms))
         if not terms:
             return []
         domain = Domain.OR([["content", "ilike", term] for term in terms])

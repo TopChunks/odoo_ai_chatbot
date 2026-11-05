@@ -74,17 +74,8 @@ class ResConfigSettings(models.TransientModel):
     def action_ai_agent_rebuild_flow_index(self):
         self.ensure_one()
         self.execute()
-        count = self.env["ai_agent.flow.index"].action_rebuild()
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {
-                "title": _("Business-flow index refreshed"),
-                "message": _("Indexed %s source excerpts from custom modules and database customizations.", count),
-                "type": "success",
-                "sticky": False,
-            },
-        }
+        self.env["ai_agent.flow.index"].action_rebuild()
+        return {"type": "ir.actions.client", "tag": "reload"}
 
     @api.onchange("ai_agent_provider_id")
     def _onchange_ai_agent_provider_id(self):
