@@ -50,6 +50,19 @@
                             <button name="base.action_res_users" type="action" string="Users" icon="oi-arrow-right" class="btn-link p-0"/>
                         </setting>
                     </block>
+                    <block title="Help for errors and custom workflows" name="ai_agent_instance_help">
+                        <setting string="Validation error help" help="A user can ask the configured AI provider to explain a supported validation error. The click sends the displayed message and model name, without a traceback or separate form payload. The error text itself may mention a value.">
+                            <field name="ai_agent_error_resolution_enabled"/>
+                        </setting>
+                        <setting string="Custom business-flow answers" help="Let the AI answer from installed custom-module code, Studio views and automation rules. Relevant indexed excerpts are sent to your configured AI provider only when a user asks about an instance workflow.">
+                            <field name="ai_agent_business_flow_enabled"/>
+                            <div class="text-muted small mt-1">
+                                <field name="ai_agent_flow_index_count" class="fw-bold w-auto oe_inline"/> code excerpts indexed
+                                <span invisible="not ai_agent_flow_indexed_at"> · Last refreshed: <field name="ai_agent_flow_indexed_at" class="oe_inline"/></span>
+                            </div>
+                            <button name="action_ai_agent_rebuild_flow_index" type="object" string="Index installed custom modules" icon="fa-refresh" class="btn-link p-0 mt-1" invisible="not ai_agent_business_flow_enabled"/>
+                        </setting>
+                    </block>
                     <block title="Limits" name="ai_agent_limits">
                         <setting string="Tool steps per answer" help="How many tool calls the AI may chain for one answer (1-25).">
                             <field name="ai_agent_max_steps"/>

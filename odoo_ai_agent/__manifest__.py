@@ -1,7 +1,7 @@
 {
     "name": "AI Agent",
-    "summary": "Chat with your Odoo data in Discuss: MCP tools, native charts, "
-    "confirmed changes, and usage and cost reporting",
+    "summary": "Chat with your Odoo data and custom workflows, get AI help for validation errors, "
+    "and review confirmed changes",
     "description": """
 AI Agent
 ========
@@ -17,6 +17,8 @@ administrator turns on data sharing.
 * AI conversations in Discuss, a chat window from the top bar, and an
   "AI Agent" tab in the messaging menu
 * Native Odoo graphs and pivots, with PDF and Excel export
+* User-requested explanations for supported validation errors
+* Optional, administrator-indexed custom-module source search for instance-specific workflow answers
 * Every change (create, update, delete, button) is a preview the user confirms
 * Usage and cost reporting per user, model and provider
 """,

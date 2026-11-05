@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-inherit="web.WarningDialog" t-inherit-mode="extension">
+        <xpath expr="//div[@role='alert']" position="after">
+            <div t-if="aiResolution.answer" class="alert alert-info mt-3 mb-0" role="status">
+                <strong>AI suggestion</strong>
+                <p class="mb-0 mt-1 text-prewrap" t-esc="aiResolution.answer"/>
+            </div>
+            <div t-if="aiResolution.error" class="alert alert-warning mt-3 mb-0" role="alert" t-esc="aiResolution.error"/>
+            <p t-if="canResolveWithAI()" class="text-muted small mt-3 mb-0">
+                The displayed error message and model name will be sent to your configured AI provider. The message may include a value.
+            </p>
+        </xpath>
+        <xpath expr="//t[@t-set-slot='footer']/button" position="before">
+            <button t-if="canResolveWithAI() or aiResolution.loading" class="btn btn-secondary" t-on-click="resolveWithAI">
+                <t t-if="aiResolution.loading">Analyzing…</t>
+                <t t-else="">Resolve with AI</t>
+            </button>
+        </xpath>
+    </t>
+    <t t-inherit="web.FormErrorDialog" t-inherit-mode="extension">
+        <xpath expr="//div[@role='alert']" position="after">
+            <div t-if="aiResolution.answer" class="alert alert-info mt-3 mb-0" role="status">
+                <strong>AI suggestion</strong>
+                <p class="mb-0 mt-1 text-prewrap" t-esc="aiResolution.answer"/>
+            </div>
+            <div t-if="aiResolution.error" class="alert alert-warning mt-3 mb-0" role="alert" t-esc="aiResolution.error"/>
+            <p t-if="canResolveWithAI()" class="text-muted small mt-3 mb-0">
+                The displayed error message will be sent to your configured AI provider. The message may include a value.
+            </p>
+        </xpath>
+        <xpath expr="//t[@t-set-slot='footer']/button[1]" position="before">
+            <button t-if="canResolveWithAI() or aiResolution.loading" class="btn btn-secondary" t-on-click="resolveWithAI">
+                <t t-if="aiResolution.loading">Analyzing…</t>
+                <t t-else="">Resolve with AI</t>
+            </button>
+        </xpath>
+    </t>
+</templates>

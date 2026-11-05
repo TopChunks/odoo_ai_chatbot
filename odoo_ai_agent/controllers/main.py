@@ -28,6 +28,16 @@ class AiAgentController(http.Controller):
         channel._ai_agent_check_conversation()
         return channel
 
+    @http.route("/ai_agent/error_resolution_enabled", type="jsonrpc", auth="user", readonly=True)
+    def error_resolution_enabled(self):
+        return request.env["ai_agent.engine"].get_error_resolution_enabled()
+
+    @http.route("/ai_agent/resolve_error", type="jsonrpc", auth="user")
+    def resolve_error(self, message, exception_name, model=None):
+        if not request.env.user.has_group("odoo_ai_agent.group_ai_agent_user"):
+            raise AccessError("AI Agent access is required.")
+        return request.env["ai_agent.engine"].resolve_validation_error(message, exception_name, model)
+
     @http.route("/ai_agent/answer", type="jsonrpc", auth="user")
     def answer(self, channel_id):
         channel = self._channel(channel_id)

@@ -5,3 +5,4 @@ access_ai_agent_model_user,ai_agent.model user,model_ai_agent_model,group_ai_age
 access_ai_agent_model_manager,ai_agent.model manager,model_ai_agent_model,group_ai_agent_manager,1,1,1,1
 access_ai_agent_usage_user,ai_agent.usage user,model_ai_agent_usage,group_ai_agent_user,1,0,0,0
 access_ai_agent_usage_manager,ai_agent.usage manager,model_ai_agent_usage,group_ai_agent_manager,1,1,1,1
+access_ai_agent_flow_index_manager,ai_agent.flow.index manager,model_ai_agent_flow_index,group_ai_agent_manager,1,1,1,1

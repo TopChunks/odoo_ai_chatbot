@@ -139,6 +139,8 @@ When something isn't enabled, the AI says so plainly:
   - Charts are real Odoo charts: switch between bar, line, pie and pivot, or **open in Odoo**.
   - **Export** any table or chart to **PDF** or **Excel**.
 - **App cards** — ask *where* something is and you get the app's own icon. **Click it** and Odoo opens that exact screen.
+- **Custom business-flow answers** — when an administrator enables and indexes custom modules, ask how this instance's workflow works. The AI cites the source module, file and line; it can only use the indexed excerpts.
+- **Validation error help** — for supported validation popups, choose **Resolve with AI** to get a likely explanation and safe next steps. The AI does not change the record automatically.
 - **Links** — web addresses in answers are clickable and open in a new tab.
 - **"Data used"** — extra results the AI looked at, folded away under the answer.
 - **"N steps taken"** — click to see what the AI did behind the scenes.
@@ -165,6 +167,8 @@ Use 👍 / 👎 under any answer. Administrators see the ratings in **Reporting 
 
 In Settings, under **Data and privacy**, there is one important switch:
 **"Share record values with the AI provider"**.
+
+Two separate administrator controls are available under **Help for errors and custom workflows**. Error help is user-triggered and sends only the displayed error message and model name (which may itself contain entered values). Business-flow answers require an administrator to enable the feature and manually index installed custom modules, Studio views and automation rules; relevant excerpts are then sent to the provider when a user asks about a workflow. Neither feature sends tracebacks or the form payload.
 
 Picture the AI as an assistant **wearing a blindfold** 🙈 who can still press Odoo's buttons for you:
 

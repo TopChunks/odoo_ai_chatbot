@@ -27,6 +27,19 @@ class ResConfigSettings(models.TransientModel):
         "record values are shown to the user but never sent to the provider. On: results are also sent to "
         "the provider so the AI can summarise and compare values in its own words.",
     )
+    ai_agent_error_resolution_enabled = fields.Boolean(
+        string="Offer AI help for validation errors",
+        config_parameter="odoo_ai_agent.error_resolution_enabled",
+        help="Users must click the button. The displayed validation message and model name are sent to the configured "
+        "AI provider; no traceback or form payload is sent (the message itself may mention a value).",
+    )
+    ai_agent_business_flow_enabled = fields.Boolean(
+        string="Answer from custom business-flow code",
+        config_parameter="odoo_ai_agent.business_flow_enabled",
+        help="Allows the AI to use relevant excerpts from the administrator-built index of installed custom modules, "
+        "Studio views and automation rules. Relevant excerpts are sent to the configured AI provider when users ask "
+        "about instance workflows.",
+    )
     ai_agent_max_steps = fields.Integer(
         string="Maximum tool steps per answer", config_parameter="odoo_ai_agent.max_steps", default=8
     )
@@ -38,6 +51,8 @@ class ResConfigSettings(models.TransientModel):
     )
     ai_agent_mcp_enabled = fields.Boolean(compute="_compute_ai_agent_mcp_status")
     ai_agent_mcp_model_count = fields.Integer(compute="_compute_ai_agent_mcp_status")
+    ai_agent_flow_index_count = fields.Integer(compute="_compute_ai_agent_flow_status")
+    ai_agent_flow_indexed_at = fields.Char(compute="_compute_ai_agent_flow_status")
 
     @api.depends("company_id")
     def _compute_ai_agent_mcp_status(self):
@@ -46,6 +61,30 @@ class ResConfigSettings(models.TransientModel):
         for settings in self:
             settings.ai_agent_mcp_enabled = enabled
             settings.ai_agent_mcp_model_count = count
+
+    @api.depends("ai_agent_business_flow_enabled")
+    def _compute_ai_agent_flow_status(self):
+        params = self.env["ir.config_parameter"].sudo()
+        count = self.env["ai_agent.flow.index"].sudo().search_count([])
+        indexed_at = params.get_param("odoo_ai_agent.business_flow_indexed_at") or ""
+        for settings in self:
+            settings.ai_agent_flow_index_count = count
+            settings.ai_agent_flow_indexed_at = indexed_at
+
+    def action_ai_agent_rebuild_flow_index(self):
+        self.ensure_one()
+        self.execute()
+        count = self.env["ai_agent.flow.index"].action_rebuild()
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Business-flow index refreshed"),
+                "message": _("Indexed %s source excerpts from custom modules and database customizations.", count),
+                "type": "success",
+                "sticky": False,
+            },
+        }
 
     @api.onchange("ai_agent_provider_id")
     def _onchange_ai_agent_provider_id(self):
@@ -60,7 +99,12 @@ class ResConfigSettings(models.TransientModel):
                 raise UserError(_("The maximum answer length must be between 256 and 65,536 tokens."))
             if settings.ai_agent_timeout and not 10 <= settings.ai_agent_timeout <= 600:
                 raise UserError(_("The provider timeout must be between 10 and 600 seconds."))
-        return super().set_values()
+        result = super().set_values()
+        for settings in self:
+            if not settings.ai_agent_business_flow_enabled:
+                self.env["ai_agent.flow.index"].sudo().search([]).unlink()
+                self.env["ir.config_parameter"].sudo().set_param("odoo_ai_agent.business_flow_indexed_at", False)
+        return result
 
     def action_ai_agent_sync_models(self):
         self.ensure_one()
