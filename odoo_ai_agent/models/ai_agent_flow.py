@@ -202,7 +202,7 @@ class AiAgentFlowIndex(models.Model):
         terms = list(dict.fromkeys(terms))
         if not terms:
             return []
-        domain = Domain.OR([["content", "ilike", term] for term in terms])
+        domain = Domain.OR([[('content', 'ilike', term)] for term in terms])
         records = self.sudo().search(domain, limit=300)
         query_terms = set(terms)
 
