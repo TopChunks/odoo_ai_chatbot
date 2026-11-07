@@ -28,10 +28,10 @@ class ResConfigSettings(models.TransientModel):
         "the provider so the AI can summarise and compare values in its own words.",
     )
     ai_agent_error_resolution_enabled = fields.Boolean(
-        string="Offer AI help for validation errors",
+        string="Resolve errors with AI",
         config_parameter="odoo_ai_agent.error_resolution_enabled",
-        help="Users must click the button. The displayed validation message and model name are sent to the configured "
-        "AI provider; no traceback or form payload is sent (the message itself may mention a value).",
+        help="Users must click the button. The error message, the model, action and record it happened on, and the "
+        "related custom code are sent to the configured AI provider; record values only if data sharing is on.",
     )
     ai_agent_business_flow_enabled = fields.Boolean(
         string="Answer from custom business-flow code",

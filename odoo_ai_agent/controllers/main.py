@@ -18,6 +18,11 @@ class AiAgentWebclient(WebclientController):
         if name == "/ai_agent/new_conversation":
             channel = request.env["discuss.channel"]._ai_agent_get_or_create_conversation()
             store.add(channel).resolve_data_request(channel=Store.One(channel, []))
+        if name == "/ai_agent/error_conversation":
+            # "Continue in AI Agent" from an error dialog: a new conversation with the error and the AI's help.
+            channel = request.env["discuss.channel"]._ai_agent_error_conversation(
+                str(params.get("message") or ""), str(params.get("answer") or ""))
+            store.add(channel).resolve_data_request(channel=Store.One(channel, []))
 
 
 class AiAgentController(http.Controller):
@@ -33,10 +38,13 @@ class AiAgentController(http.Controller):
         return request.env["ai_agent.engine"].get_error_resolution_enabled()
 
     @http.route("/ai_agent/resolve_error", type="jsonrpc", auth="user")
-    def resolve_error(self, message, exception_name, model=None):
+    def resolve_error(self, message, exception_name, model=None, method=None, record_ids=None, traceback=None):
         if not request.env.user.has_group("odoo_ai_agent.group_ai_agent_user"):
             raise AccessError("AI Agent access is required.")
-        return request.env["ai_agent.engine"].resolve_validation_error(message, exception_name, model)
+        if not isinstance(record_ids, list):
+            record_ids = []
+        return request.env["ai_agent.engine"].resolve_validation_error(
+            message, exception_name, model, method, record_ids, traceback)
 
     @http.route("/ai_agent/answer", type="jsonrpc", auth="user")
     def answer(self, channel_id):

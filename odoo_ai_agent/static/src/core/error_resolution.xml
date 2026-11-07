@@ -1,39 +1,65 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <templates xml:space="preserve">
+
+    <!-- The AI's help, shown under the error message (shared by every error dialog below). -->
+    <t t-name="odoo_ai_agent.ErrorResolution">
+        <div t-if="aiResolution.answer" class="o_ai_agent_error_help alert alert-info mt-3 mb-0" role="status">
+            <strong>AI Agent</strong>
+            <div t-if="aiResolution.answerHtml" class="mt-1 o_ai_agent_error_answer" t-out="aiResolution.answerHtml"/>
+            <p t-else="" class="mb-0 mt-1 text-prewrap" t-esc="aiResolution.answer"/>
+            <div t-if="aiResolution.sources.length" class="small text-muted mt-2">
+                Checked in this instance's code:
+                <t t-foreach="aiResolution.sources" t-as="source" t-key="source_index">
+                    <code class="ms-1" t-esc="source.module + '/' + source.path + ':' + source.line"/>
+                </t>
+            </div>
+            <div t-elif="!aiResolution.codeChecked" class="small text-muted mt-2">
+                The custom code was not checked: an administrator can turn on the business-flow index in AI Agent settings.
+            </div>
+        </div>
+        <div t-if="aiResolution.error" class="alert alert-warning mt-3 mb-0" role="alert" t-esc="aiResolution.error"/>
+        <div t-if="aiResolution.enabled" class="d-flex flex-wrap align-items-center gap-2 mt-3">
+            <t t-call="odoo_ai_agent.ErrorResolutionButtons"/>
+            <span t-if="canResolveWithAI()" class="text-muted small">
+                The error message, the screen and record it happened on, and the related code of this instance are sent to your AI provider. Record values are sent only if data sharing is on.
+            </span>
+        </div>
+    </t>
+
+    <t t-name="odoo_ai_agent.ErrorResolutionButtons">
+        <button t-if="aiResolution.enabled and !aiResolution.answer" class="btn btn-secondary"
+                t-att-disabled="aiResolution.loading" t-on-click="resolveWithAI">
+            <i class="fa fa-magic me-1"/>
+            <t t-if="aiResolution.loading">Analysing…</t>
+            <t t-else="">Resolve with AI</t>
+        </button>
+        <button t-if="aiResolution.answer" class="btn btn-secondary" t-on-click="continueInAiAgent">
+            Continue in AI Agent
+        </button>
+    </t>
+
     <t t-inherit="web.WarningDialog" t-inherit-mode="extension">
         <xpath expr="//div[@role='alert']" position="after">
-            <div t-if="aiResolution.answer" class="alert alert-info mt-3 mb-0" role="status">
-                <strong>AI suggestion</strong>
-                <p class="mb-0 mt-1 text-prewrap" t-esc="aiResolution.answer"/>
-            </div>
-            <div t-if="aiResolution.error" class="alert alert-warning mt-3 mb-0" role="alert" t-esc="aiResolution.error"/>
-            <p t-if="canResolveWithAI()" class="text-muted small mt-3 mb-0">
-                The displayed error message and model name will be sent to your configured AI provider. The message may include a value.
-            </p>
-        </xpath>
-        <xpath expr="//t[@t-set-slot='footer']/button" position="before">
-            <button t-if="canResolveWithAI() or aiResolution.loading" class="btn btn-secondary" t-on-click="resolveWithAI">
-                <t t-if="aiResolution.loading">Analyzing…</t>
-                <t t-else="">Resolve with AI</t>
-            </button>
+            <t t-call="odoo_ai_agent.ErrorResolution"/>
         </xpath>
     </t>
+
+    <t t-inherit="web.RedirectWarningDialog" t-inherit-mode="extension">
+        <xpath expr="//div[@role='alert']" position="after">
+            <t t-call="odoo_ai_agent.ErrorResolution"/>
+        </xpath>
+    </t>
+
     <t t-inherit="web.FormErrorDialog" t-inherit-mode="extension">
         <xpath expr="//div[@role='alert']" position="after">
-            <div t-if="aiResolution.answer" class="alert alert-info mt-3 mb-0" role="status">
-                <strong>AI suggestion</strong>
-                <p class="mb-0 mt-1 text-prewrap" t-esc="aiResolution.answer"/>
-            </div>
-            <div t-if="aiResolution.error" class="alert alert-warning mt-3 mb-0" role="alert" t-esc="aiResolution.error"/>
-            <p t-if="canResolveWithAI()" class="text-muted small mt-3 mb-0">
-                The displayed error message will be sent to your configured AI provider. The message may include a value.
-            </p>
+            <t t-call="odoo_ai_agent.ErrorResolution"/>
         </xpath>
-        <xpath expr="//t[@t-set-slot='footer']/button[1]" position="before">
-            <button t-if="canResolveWithAI() or aiResolution.loading" class="btn btn-secondary" t-on-click="resolveWithAI">
-                <t t-if="aiResolution.loading">Analyzing…</t>
-                <t t-else="">Resolve with AI</t>
-            </button>
+    </t>
+
+    <!-- Shared by server crashes (RPCErrorDialog, patched) and client errors (not patched: nothing shows). -->
+    <t t-inherit="web.ErrorDialog" t-inherit-mode="extension">
+        <xpath expr="//div[@role='alert']" position="after">
+            <t t-if="aiResolution" t-call="odoo_ai_agent.ErrorResolution"/>
         </xpath>
     </t>
 </templates>

@@ -74,6 +74,25 @@ class DiscussChannel(models.Model):
         })
         return channel.sudo(False)
 
+    @api.model
+    def _ai_agent_error_conversation(self, message, answer):
+        """A conversation that starts with the error the user got and the AI's help, to ask follow-up questions."""
+        self._ai_agent_check_user()
+        if not self.env["ai_agent.engine"].get_error_resolution_enabled():
+            raise AccessError(_("AI help for errors is disabled."))
+        message = " ".join(str(message or "").split())[:1500]
+        answer = str(answer or "").strip()[:6000]
+        channel = self._ai_agent_get_or_create_conversation()
+        channel.sudo().name = _("Error: %s", message[:60]) if message else _("Error help")
+        channel.message_post(body=_("I got this error: %s", message), message_type="comment",
+                             subtype_xmlid="mail.mt_comment")
+        if answer:
+            channel.sudo().message_post(
+                author_id=self._ai_agent_partner().id, body=self.env["ai_agent.engine"]._markdown(answer),
+                message_type="comment", subtype_xmlid="mail.mt_comment",
+            )
+        return channel
+
     def ai_agent_rename(self, name):
         self._ai_agent_check_conversation()
         name = (name or "").strip()[:120]

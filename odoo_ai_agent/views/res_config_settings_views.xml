@@ -51,10 +51,10 @@
                         </setting>
                     </block>
                     <block title="Help for errors and custom workflows" name="ai_agent_instance_help">
-                        <setting string="Validation error help" help="A user can ask the configured AI provider to explain a supported validation error. The click sends the displayed message and model name, without a traceback or separate form payload. The error text itself may mention a value.">
+                        <setting string="Resolve errors with AI" help="Adds a Resolve with AI button to Odoo error dialogs (validation, access, missing record and server errors). On click, Odoo finds the custom code that raised the error (when the business-flow index below is on) and checks the record it happened on; the AI explains the cause and how to fix it. Record values are sent only if data sharing is on. For a server crash, only the lines of the traceback that are in custom modules are used.">
                             <field name="ai_agent_error_resolution_enabled"/>
                         </setting>
-                        <setting string="Custom business-flow answers" help="Let the AI answer from installed custom-module code, Studio views and automation rules. Relevant indexed excerpts are sent to your configured AI provider only when a user asks about an instance workflow.">
+                        <setting string="Custom business-flow answers" help="Let the AI answer from this instance's own custom modules (standard Odoo and the AI Agent itself are skipped), Studio views and automation rules, and use them to resolve errors. Relevant excerpts are sent to your configured AI provider only when a user asks about a workflow or resolves an error. Rebuild the index after installing or updating custom modules.">
                             <field name="ai_agent_business_flow_enabled"/>
                             <div class="text-muted small mt-1">
                                 <field name="ai_agent_flow_index_count" class="fw-bold w-auto oe_inline"/> code excerpts indexed
