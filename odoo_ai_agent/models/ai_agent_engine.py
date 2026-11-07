@@ -247,6 +247,21 @@ CALCULATE_SCHEMA = {
     "additionalProperties": False,
 }
 
+SETTINGS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "query": {"type": "string", "description": "What the option does, in the user's words, e.g. 'lock confirmed "
+                  "orders', 'purchase approval', 'product variants', 'multi currency'."},
+        "app": {"type": "string", "description": "Optional app whose settings to search, e.g. Purchase, Sales."},
+    },
+    "required": ["query"],
+}
+# Settings whose value is never reported (keys, passwords, tokens...), whatever their type.
+SETTING_SECRET = re.compile(r"key|secret|token|password|passwd|pwd|credential|auth", re.IGNORECASE)
+SETTING_STOPWORDS = {"setting", "settings", "option", "options", "enable", "enabled", "turn", "where", "how", "can",
+                     "the", "and", "for", "this", "that", "they", "them", "is", "are", "be", "on", "off", "find",
+                     "activate", "activated", "configure", "configuration", "feature", "features", "does", "what",
+                     "there", "have", "our", "my", "in", "of", "to", "it", "do", "we", "you", "odoo", "app", "apps"}
 ACCESS_RIGHTS_SCHEMA = {
     "type": "object",
     "properties": {
@@ -315,7 +330,7 @@ RATING_INTENT = re.compile(r"\b(?:compar\w*|rate|rating|rank\w*|best|worst|score
                            re.IGNORECASE)
 # Tools that read no records of a model (field lists, menus, calculations): not limited by the user's apps.
 APP_GATE_FREE_KINDS = ("schema", "app", "calculate", "present", "conversation_stats",
-                       "access_rights")  # access_rights checks itself: own rights, or an administrator
+                       "access_rights", "settings")  # access_rights checks itself: own rights, or an administrator
 # Directory data everyone sees in Odoo (names in salesperson fields...): only these fields need the app.
 APP_GATE_DIRECTORY = {"res.users": ("group_ids", "all_group_ids", "groups_id", "role", "login_date", "log_ids",
                                     "share", "api_key_ids"),
@@ -480,6 +495,7 @@ PROGRESS_LABELS = {
     "calculate": _lt("Calculating…"),
     "conversation_stats": _lt("Comparing salespeople…"),
     "user_access_rights": _lt("Reading access rights…"),
+    "find_setting": _lt("Checking the settings…"),
     "find_changes": _lt("Checking the change history of %s…"),
     "search_business_flow": _lt("Checking the custom business flow…"),
 }
@@ -836,6 +852,16 @@ class AiAgentEngine(models.AbstractModel):
             "kind": "conversation_stats",
         })
         tools.append({
+            "name": "find_setting",
+            "description": "Find an option on the Configuration > Settings screens of the installed apps (any app): "
+            "where it is, what it does and whether it is on in this company. Use it whenever the user asks whether a "
+            "feature or option is enabled, where or how to turn something on, or why an Odoo feature, field or button "
+            "does not appear (e.g. 'is Lock Confirmed Orders on?', 'where do I enable purchase approval?').",
+            "schema": SETTINGS_SCHEMA,
+            "raw_schema": SETTINGS_SCHEMA,
+            "kind": "settings",
+        })
+        tools.append({
             "name": "user_access_rights",
             "description": "A user's access rights exactly as on the Access Rights tab of their user form in Odoo: "
             "role, companies, and the access level for each application (No when none), built by Odoo. Use it for "
@@ -1005,6 +1031,7 @@ HOW TO USE THE TOOLS
 - Win rate means won ÷ (won + lost) over opportunities only (type opportunity, archived lost ones included), by closing date; say so in one short phrase. Leads count only for a lead conversion rate or when the user asks to include them. Win rate or conversion per salesperson: use conversation_stats (its win_rate column) with all_salespeople or names, not your own aggregates.
 - In Sales, a quotation is a sale.order in state draft or sent; a confirmed sales order is in state sale. "Latest quotation" means the newest draft or sent one. In Purchase, an RFQ (request for quotation) is a purchase.order in state draft, sent or to approve; a purchase order is in state purchase or done.
 - The Settings / Administration access group is "Role / Administrator" (res.groups name "Administrator" without a privilege); the per-app "Administrator" groups are different. To answer who has an access, show the group's users (user_ids).
+- Whether an option or feature is on, where or how to turn it on, or why a feature, field or button is missing: call find_setting first, then say clearly whether it is on or off and exactly where it is (App > Configuration > Settings > section > option); do not only explain how to do it on a record.
 - For a user's access rights, permissions or groups ("what access rights do I have", "what can Priya do", "who has Sales administrator access"), use user_access_rights: Odoo builds them exactly as on the user form. Use ir.model.access only when the user explicitly asks about model-level permissions (read, write, create or delete).
 - For relative dates (today, this week, this month, last 6 months, this quarter, next 7 days...), pass 'period' instead of writing dates; Odoo computes them.
 - Quantities and amounts of what actually happened (produced or production output, sold, delivered, received, paid) count only records whose status means it happened, not drafts, plans or cancelled ones, unless the user asks otherwise. Use the model's real status values (get_fields or get_filters; e.g. a payment may be "in process" or "paid", never filter on a value the model does not have) and say which status you used.
@@ -1300,6 +1327,8 @@ STYLE
                 result = self._tool_conversation_stats(arguments, state)
             elif tool["kind"] == "access_rights":
                 result = self._tool_access_rights(arguments, state)
+            elif tool["kind"] == "settings":
+                result = self._tool_find_setting(arguments, state)
             elif tool["kind"] == "changes":
                 result = self._tool_find_changes(arguments, state)
             elif tool["kind"] == "business_flow":
@@ -1748,6 +1777,180 @@ STYLE
             where = (_("Settings > %(app)s > %(setting)s", app=app, setting=label) if app == "General Settings"
                      else _("%(app)s > Configuration > Settings > %(setting)s", app=app, setting=label))
         return {"label": label, "state": module.state, "where": where}
+
+    @api.model
+    def _settings_catalog(self):
+        """Every setting of the Settings screen of the installed apps: where it is, what it says, its fields.
+
+        Read from the settings form itself (as the administrator, since the form hides admin-only settings from
+        other users), so it covers every app, including custom ones, without knowing any setting in advance.
+        """
+        from lxml import etree
+        from odoo import SUPERUSER_ID
+        Settings = self.env["res.config.settings"].with_user(SUPERUSER_ID)
+        try:
+            arch = etree.fromstring(Settings.get_view(view_type="form")["arch"])
+        except Exception:  # noqa: BLE001 - no settings form, nothing to describe
+            return []
+        catalog = []
+        for app in arch.iter("app"):
+            app_name = app.get("string") or app.get("data-string") or app.get("name") or ""
+            for setting in app.iter("setting"):
+                own = [f.get("name") for f in setting.xpath(".//field[@name]")
+                       if f.xpath("ancestor::setting[1]")[0] is setting and f.get("name") in Settings._fields]
+                if not own:
+                    continue
+                main = own[0]
+                blocks = setting.xpath("ancestor::block[1]")
+                parents = setting.xpath("ancestor::setting[1]")
+                parent = ""
+                if parents:
+                    first = [f.get("name") for f in parents[0].xpath(".//field[@name]")
+                             if f.get("name") in Settings._fields][:1]
+                    parent = parents[0].get("string") or (Settings._fields[first[0]].string if first else "")
+                catalog.append({
+                    "app": app_name,
+                    "general": app.get("name") == "general_settings",
+                    "section": (blocks[0].get("title") or "") if blocks else "",
+                    "label": setting.get("string") or Settings._fields[main].string or main,
+                    "help": " ".join((setting.get("help") or "").split()),
+                    "parent": parent,
+                    "company": setting.get("company_dependent") == "1",
+                    "fields": own,
+                    "options": " ".join(Settings._fields[f].string or "" for f in own[1:]),
+                })
+        return catalog
+
+    @api.model
+    def _setting_values(self, catalog_entries, technical):
+        """{field: shown value} of the settings found, for the current company. Only safe kinds of values: on/off and
+        choices for everyone; numbers and linked records for administrators; never text (keys, passwords...)."""
+        Settings = self.env["res.config.settings"].sudo().with_company(self.env.company)
+        safe = []
+        for entry in catalog_entries:
+            for name in entry["fields"]:
+                field = Settings._fields.get(name)
+                if field is None or SETTING_SECRET.search(name) or name in safe:
+                    continue
+                if field.type in ("boolean", "selection") or (
+                        technical and field.type in ("integer", "float", "monetary", "many2one")):
+                    safe.append(name)
+        if not safe:
+            return {}
+        # The values the Settings screen shows: a temporary settings record (defaults and company-related
+        # fields), read inside a savepoint that is always rolled back, so nothing is saved or applied.
+        values = {}
+        try:
+            with self.env.cr.savepoint() as savepoint:
+                record = Settings.create({})
+                for name in safe:
+                    field = Settings._fields[name]
+                    value = record[name]
+                    values[name] = value.id if field.type == "many2one" else value
+                savepoint.close(rollback=True)  # undo the temporary record and clear its cache
+        except Exception:  # noqa: BLE001 - the place of the setting can still be told
+            return {}
+        meta = Settings.fields_get(safe, attributes=["selection", "type"])
+        shown = {}
+        for name in safe:
+            value = values.get(name)
+            kind = meta.get(name, {}).get("type")
+            if kind == "boolean":
+                shown[name] = _("on") if value else _("off")
+            elif kind == "selection":
+                labels = dict(meta[name].get("selection") or [])
+                shown[name] = labels.get(value, value) if value not in (None, False) else _("not set")
+            elif kind == "many2one":
+                record = self.env[Settings._fields[name].comodel_name].sudo().browse(value).exists() if value else None
+                shown[name] = record.display_name if record else _("not set")
+            elif value not in (None, False):
+                shown[name] = str(value)
+        return shown
+
+    @api.model
+    def _tool_find_setting(self, arguments, state):
+        """Where a setting is in Configuration > Settings, what it does, and whether it is on (generic, all apps)."""
+        query = " ".join(str(arguments.get("query") or "").split())[:200]
+        if not query:
+            raise UserError(_("Say which option to look for, e.g. 'lock confirmed orders'."))
+        app_filter = " ".join(str(arguments.get("app") or "").casefold().split())
+        terms = []
+        for word in re.findall(r"[^\W\d_]{3,}", query.casefold()):
+            if word in SETTING_STOPWORDS:
+                continue
+            terms.append(word)
+            if word.endswith("ies") and len(word) > 5:
+                terms.append(word[:-3] + "y")
+                continue
+            for suffix in ("ing", "ed", "es", "s"):
+                if word.endswith(suffix) and len(word) - len(suffix) >= 3:
+                    terms.append(word[:-len(suffix)])
+                    break
+        terms = list(dict.fromkeys(terms))
+        if not terms:
+            raise UserError(_("Say which option to look for, e.g. 'lock confirmed orders'."))
+        catalog = self._settings_catalog()
+
+        def score(entry):
+            label, help_text = entry["label"].casefold(), entry["help"].casefold()
+            other = f"{entry['section']} {entry['parent']}".casefold()
+            options = entry["options"].casefold()
+            value = sum(4 if term in label else 3 if term in options else 1 if term in help_text or term in other
+                        else 0 for term in terms)
+            if app_filter and app_filter not in entry["app"].casefold():
+                value = 0
+            elif value and any(term in entry["app"].casefold() for term in terms):
+                value += 2
+            return value
+
+        found = sorted((e for e in catalog if score(e)), key=score, reverse=True)
+        if found:
+            best = score(found[0])
+            found = [e for e in found if score(e) >= max(2, best / 2)][:3]
+        if not found:
+            return (f"No option matching '{query}' exists in Configuration > Settings of the installed apps. Say so "
+                    "plainly; it may be done on the record itself, need an app that is not installed, or not exist.")
+        technical = self.env.user.has_group("base.group_system")
+        values = self._setting_values(found, technical)
+        modules = self.env["ir.module.module"].sudo()
+        lines = []
+        for entry in found:
+            path = [p for p in (entry["section"], entry["label"]) if p]
+            where = " > ".join((["Settings"] if entry["general"] else [entry["app"], "Configuration", "Settings"]) + path)
+            if entry["parent"]:
+                where += f" (under {entry['parent']})"
+            main = entry["fields"][0]
+            if main.startswith("module_"):
+                module = modules.search([("name", "=", main[7:])], limit=1)
+                if not module or module.state == "uninstallable":
+                    status = _("not available in this edition (Enterprise)")
+                elif module.state == "installed":
+                    status = _("on (its app is installed)")
+                else:
+                    status = _("off (turning it on installs the %s app)", module.shortdesc or main[7:])
+            elif SETTING_SECRET.search(main):
+                status = _("value not shown (secret)")
+            else:
+                status = values.get(main, _("value not shown"))
+            extra = [f"{self.env['res.config.settings']._fields[f].string}: {values[f]}"
+                     for f in entry["fields"][1:] if f in values]
+            line = f"- {entry['label']}: {status}. Where: {where}."
+            if entry["help"]:
+                line += f" What it does: {entry['help'].rstrip('.')}."
+            if entry["company"]:
+                line += f" Per company (this is {self.env.company.name})."
+            if extra:
+                line += " Details: " + "; ".join(extra) + "."
+            lines.append(line)
+        if technical:
+            target = found[0]
+            app = "Settings" if target["general"] else target["app"]
+            self._tool_show_app({"app": app, "menu": "Settings"}, state)
+        who = ("The user is an administrator and can change these settings." if technical else
+               "The user is not an administrator: tell them an administrator can change it there.")
+        return ("Settings found on the Configuration > Settings screens (current company), best match first:\n"
+                + "\n".join(lines) + f"\n{who} Answer with the best match: say clearly whether it is on or off and "
+                "exactly where it is. Mention another match only if it may be what the user meant.")
 
     @api.model
     def _module_settings(self):
