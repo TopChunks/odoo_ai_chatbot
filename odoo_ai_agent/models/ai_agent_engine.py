@@ -368,6 +368,9 @@ RAW_TAG = re.compile(r"<(?=/?[A-Za-z!])(?!/?(?:b|i|u|s|em|strong|br|code|p|ul|ol
 NO_CHART = re.compile(r"\bnothing to (?:chart|plot|draw)\b", re.IGNORECASE)
 # "I accidentally displayed a first chart...": about the AI's own tool calls, not the user's data.
 MISTAKE = re.compile(r"\s*[^.!?\n]*\b(?:accidentally|by mistake|mistakenly)\b[^.!?\n]*[.!?]", re.IGNORECASE)
+# "The list is capped at 100 rows, so if you have more...": removed when every table shown is complete.
+CAPPED = re.compile(r"\s*[^.!?\n]*\b(?:capped|limited|truncated|cut off)\s+(?:at|to)\s+(?:the\s+first\s+)?\d+[^.!?\n]*[.!?]",
+                    re.IGNORECASE)
 # "The order's card is shown below": the answer promises a record card.
 CARD_CLAIM = re.compile(r"\bcard\b", re.IGNORECASE)
 REFERS_SHOWN_NUDGE = ("(Nothing is shown in this answer yet: tables and charts of earlier answers are not shown again. "
@@ -1026,6 +1029,7 @@ WHEN SOMETHING IS UNCLEAR
 - Company definitions differ (which date defines "this month", which statuses count as "sales", which team…). When the answer depends on such a choice and the user has not said it in this conversation, ask one short clarifying question before running tools. Remember the user's answer for the rest of the conversation.
 - When a sensible default is obvious and the question is simple, you may use it instead, and say in one short sentence which assumption you made.
 - When a word fits two different things and the answers would differ (a name that matches several records, a term that exists in two apps, a status that belongs to another kind of record), do not pick one silently: ask one short question naming the options. If you looked them up, show the matches so the user can choose.
+- A generic word with no name ("stock of product in each location", "sales by customer", "orders per salesperson") means all of them: answer for all, grouped, and do not ask which one. Ask only when the request needs one specific record (its details, history or a change) and none is named.
 - A partial name ("Alpha", "Ravi") may match several contacts, employees or products: search that model by name first. If one record has exactly the name the user wrote, use it. If several match, show them and ask which one before going further, except for private data (see below). A company or person named in a sales, purchase or invoice question is the customer or vendor (partner_id), not a product.
 - Before retrieving records using a partial entity name, first search the relevant Odoo model to identify matching records. Do not execute the final business-record search until the entity has been identified.
 - If multiple matching entities are found, show their names and ask the user to select one. Never arbitrarily select the first matching record.
@@ -2408,6 +2412,7 @@ STYLE
                       "domain": row_domains.get(self._group_key(group, groupby))} for group in groups],
             "total": len(groups),
             "grouped": True,
+            "has_more": bool(structured.get("has_more")),  # more groups than shown (the list really is cut)
             "subtitle": self._scope_text(model, domain, state.get("filter_labels", {}).get(signature)),
             # How it was computed, so present can turn it into a native graph or pivot.
             "spec": {"model": model, "groupby": groupby, "aggregates": aggregates,
@@ -2440,8 +2445,11 @@ STYLE
             matching = f"{count} matching" if count is not None else "the matching"
             return (f"[{ref}] Overall totals of {matching} {label} records (records this user can access) with "
                     f"the columns {self._column_text(columns)}.")
+        complete = "" if structured.get("has_more") else (
+            f" This is the complete result: all {len(groups)} groups, nothing was cut off; do not say the list is "
+            "capped or limited.")
         return (f"[{ref}] {len(groups)} group(s) of {label} (records this user can access) with the columns "
-                f"{self._column_text(columns)}.{key_text}{more}")
+                f"{self._column_text(columns)}.{key_text}{more}{complete}")
 
     @api.model
     def _block_attachments(self, structured, state, signature=None):
@@ -3512,6 +3520,7 @@ STYLE
             "rows": [{"values": values} for values in rows.values()],
             "total": len(rows),
             "grouped": True,
+            "has_more": any(source.get("has_more") for source in sources),
         }
 
     @api.model
@@ -4348,6 +4357,10 @@ STYLE
         text = SHOWN_ABOVE.sub(r"\1\2below", text or "")
         if state.get("blocks"):
             text = MISTAKE.sub("", text).strip()  # "I ran the chart twice by mistake": Odoo already shows it once
+            tables = [b for b in state["blocks"] if b.get("type") == "table" and not b.get("collapsed")]
+            if tables and all((b.get("total") or 0) <= len(b.get("rows") or []) and not b.get("has_more")
+                              for b in tables):
+                text = CAPPED.sub("", text).strip()  # every table shown is complete: no "list is capped" warning
         text = self._paid_verdict(state.get("question") or "", text)
         if not (config or {}).get("share_data") and state.get("blocks"):
             for pattern in HANDBACK_FILTERS:

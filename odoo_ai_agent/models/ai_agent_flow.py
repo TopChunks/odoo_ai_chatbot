@@ -39,6 +39,8 @@ SKIP_DIRS = {"__pycache__", ".git", ".hg", ".svn", "node_modules", "tests", "tes
 # The AI Agent and the MCP server are tools, not this instance's business flow.
 SELF_MODULES = {"odoo_ai_agent", "mcp_server"}
 MAX_INDEX_CHUNKS = 8000
+SMALL_MODULE_METHODS = 6  # a model with this many custom methods or fewer is shown whole
+MAX_EXCERPTS = 10  # excerpts sent to the AI for one question
 MAX_FILE_BYTES = 256_000
 CHUNK_LINES = 40
 CHUNK_CHARS = 3000
@@ -496,7 +498,15 @@ class AiAgentFlowIndex(models.Model):
         modules = {r.module_name for r in top}
         overviews = self.sudo().search([("kind", "=", "overview"), ("module_name", "in", list(modules))])
         top = list(overviews.filtered(lambda o: o not in top)[:2]) + top
-        return [self._excerpt(record) for record in top]
+        # "What custom rules do we have on sales orders?": for a small module, every method of the model asked
+        # about, so the answer lists all its rules and not only the best-matching ones.
+        models_asked = wanted_models or {r.model_name for r in top if r.model_name}
+        for module in modules:
+            methods = self.sudo().search([("module_name", "=", module), ("kind", "=", "method"),
+                                          ("model_name", "in", list(models_asked))])
+            if len(methods) <= SMALL_MODULE_METHODS:
+                top += [m for m in methods if m not in top]
+        return [self._excerpt(record) for record in top[:MAX_EXCERPTS]]
 
     @api.model
     def find_error_source(self, message, frames=None, model=None):
