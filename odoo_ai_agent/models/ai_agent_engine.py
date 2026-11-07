@@ -372,6 +372,8 @@ IN_TABLE = re.compile(r"\s*[^.!?\n]*\b(?:figures|values|amounts|numbers|prices?|
 CANT_SEE = re.compile(r"\s*[^.!?\n]*\bI (?:can't|cannot|can not|don't|do not) (?:see|read|view|state|tell|give|quote|"
                       r"say)\b[^.!?\n]*\b(?:figures?|values?|amounts?|numbers?|prices?|totals?)\b[^.!?\n]*[.!?]",
                       re.IGNORECASE)
+# Sentences that hand the reading back to the user, removed when data sharing is off (in this order).
+HANDBACK_FILTERS = (CANT_SEE, YOURSELF, HANDBACK, IN_TABLE)
 FINAL_STEP_NOTE = (
     "\n\nNO TOOL STEPS LEFT: write the final answer now from the results you already have (Odoo shows them to the user). "
     "If something could not be found, say so in one sentence."
@@ -976,7 +978,7 @@ HOW TO USE THE TOOLS
 - Win rate means won ÷ (won + lost) over opportunities only (type opportunity, archived lost ones included), by closing date; say so in one short phrase. Leads count only for a lead conversion rate or when the user asks to include them. Win rate or conversion per salesperson: use conversation_stats (its win_rate column) with all_salespeople or names, not your own aggregates.
 - In Sales, a quotation is a sale.order in state draft or sent; a confirmed sales order is in state sale. "Latest quotation" means the newest draft or sent one. In Purchase, an RFQ (request for quotation) is a purchase.order in state draft, sent or to approve; a purchase order is in state purchase or done.
 - The Settings / Administration access group is "Role / Administrator" (res.groups name "Administrator" without a privilege); the per-app "Administrator" groups are different. To answer who has an access, show the group's users (user_ids).
-- For questions about a user's application access (for example, "What access rights does Thulasi have?"), find the exact user in res.users and inspect all_group_ids (the effective groups, including implied access), not just group_ids. On Odoo 19, report each group's privilege_id as the application/right section and its name as the access level (for example, "AI Agent: User"). Include access implied by another group when the user form displays it (for example, Products: View). If a group has no privilege_id, list it separately as a general Odoo role; do not infer an application from the role name. Do not use ir.model.access rows or the MCP enabled-model list as a user's application access rights. Use ir.model.access only when the user explicitly asks about model-level permissions (read, write, create or delete).
+- For a user's access rights, permissions or groups ("what access rights do I have", "what can Priya do", "who has Sales administrator access"), use user_access_rights: Odoo builds them exactly as on the user form. Use ir.model.access only when the user explicitly asks about model-level permissions (read, write, create or delete).
 - For relative dates (today, this week, this month, last 6 months, this quarter, next 7 days...), pass 'period' instead of writing dates; Odoo computes them.
 - Quantities and amounts of what actually happened (produced or production output, sold, delivered, received, paid) count only records whose status means it happened, not drafts, plans or cancelled ones, unless the user asks otherwise. Use the model's real status values (get_fields or get_filters; e.g. a payment may be "in process" or "paid", never filter on a value the model does not have) and say which status you used.
 - Overdue or late activities on records (leads, orders, tasks...): records whose next activity deadline is before today, for everyone: ["activity_date_deadline", "<", today]. Odoo's "Late Activities" filter covers only the current user's own activities: use it only for "my overdue activities".
@@ -1425,7 +1427,7 @@ STYLE
         tied = [n for n in tied if n]
         if not tied:
             return False
-        shown = f"{value:,.2f}".rstrip("0").rstrip(".") if isinstance(value, float) else f"{value:,}"
+        shown = self._number(value)
         who = tied[0] if len(tied) == 1 else _("%(first)s and %(last)s, tied", first=", ".join(tied[:-1][:3]),
                                                 last=tied[-1])
         heading = title or (_("Lowest %s", column["label"]) if lowest else _("Highest %s", column["label"]))
@@ -1673,17 +1675,7 @@ STYLE
             return self._tool_failed(state, step, call, _(
                 "Unknown model: %(model)s. %(app)s is installed; its data is in: %(models)s.", model=model,
                 app=feature["label"], models=", ".join(feature["installed_models"][:6])))
-        admin = self.env.user.has_group("base.group_system")
-        label, where = feature["label"], feature.get("where")
-        if feature["state"] == "uninstallable":
-            text = _("%s is not available in this Odoo installation (it is not part of this edition).", label)
-        elif where:
-            text = (_("%(label)s is not enabled. You can turn it on in %(where)s.", label=label, where=where) if admin
-                    else _("%(label)s is not enabled. An administrator can turn it on in %(where)s.", label=label,
-                           where=where))
-        else:
-            text = (_("%s is not installed. You can install it from the Apps menu.", label) if admin
-                    else _("%s is not installed. An administrator can install it from the Apps menu.", label))
+        text = self._unavailable_text(feature["label"], feature["state"], feature.get("where"))
         self._add_notice(state, text)
         step.update(status="error", detail=text)
         state["tool_errors"] += 1
@@ -2770,6 +2762,21 @@ STYLE
                     extra = company.get(value[0]) or f"ID {value[0]}"
                     group[spec] = type(value)([value[0], f"{value[1]} ({extra})"])
 
+    def _unavailable_text(self, label, module_state, where=None):
+        """What to tell the user about an app or feature that is not there: not in this edition, not enabled
+        (with where to turn it on), or not installed; administrators are told they can do it themselves."""
+        admin = self.env.user.has_group("base.group_system")
+        if module_state == "uninstallable":
+            return _("%s is not available in this Odoo installation (it is not part of this edition).", label)
+        if where:
+            if admin:
+                return _("%(label)s is not enabled. You can turn it on in %(where)s.", label=label, where=where)
+            return _("%(label)s is not enabled. An administrator can turn it on in %(where)s.", label=label,
+                     where=where)
+        if admin:
+            return _("%s is not installed. You can install it from the Apps menu.", label)
+        return _("%s is not installed. An administrator can install it from the Apps menu.", label)
+
     def _app_unavailable(self, app, menu, best, root_of):
         """An app the user cannot open: not in this edition, not installed, or installed without access."""
         wanted = " ".join(str(app or "").casefold().split())
@@ -2777,13 +2784,8 @@ STYLE
             modules = self.env["ir.module.module"].sudo().search([("state", "!=", "installed")]).filtered(
                 lambda m: " ".join((m.shortdesc or "").casefold().split()) == wanted)
             module = modules.sorted(lambda m: not m.application)[:1]
-            if module.state == "uninstallable":
-                return _("%s is not available in this Odoo installation (it is not part of this edition).",
-                         module.shortdesc)
             if module:
-                if self.env.user.has_group("base.group_system"):
-                    return _("%s is not installed. You can install it from the Apps menu.", module.shortdesc)
-                return _("%s is not installed. An administrator can install it from the Apps menu.", module.shortdesc)
+                return self._unavailable_text(module.shortdesc, module.state)
         # Installed, but its menus are hidden from this user (e.g. Invoicing for a sales user).
         Menu = self.env["ir.ui.menu"].sudo()
         hidden = best(Menu.search([("parent_id", "=", False)]), app, lambda m: m.name) if wanted else Menu.browse()
@@ -4313,7 +4315,9 @@ STYLE
             text = MISTAKE.sub("", text).strip()  # "I ran the chart twice by mistake": Odoo already shows it once
         text = self._paid_verdict(state.get("question") or "", text)
         if not (config or {}).get("share_data") and state.get("blocks"):
-            text = IN_TABLE.sub("", HANDBACK.sub("", YOURSELF.sub("", CANT_SEE.sub("", text)))).strip()
+            for pattern in HANDBACK_FILTERS:
+                text = pattern.sub("", text)
+            text = text.strip()
         body = self._markdown(text)
         if error and not body:
             body = Markup("<p>%s</p>") % error

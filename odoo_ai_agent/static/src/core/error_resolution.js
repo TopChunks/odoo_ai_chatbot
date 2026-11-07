@@ -108,51 +108,33 @@ function setupErrorResolution(component, { message, exceptionName, model, traceb
     });
 }
 
-patch(WarningDialog.prototype, {
-    setup() {
-        super.setup(...arguments);
-        setupErrorResolution(this, {
-            message: () => this.message,
-            exceptionName: () => this.props.exceptionName || this.props.data?.name,
-            model: () => this.props.model || "",
-            traceback: () => "",
-        });
-    },
-});
-
-patch(RedirectWarningDialog.prototype, {
-    setup() {
-        super.setup(...arguments);
-        setupErrorResolution(this, {
-            message: () => this.message,
-            exceptionName: () => this.props.exceptionName || this.props.data?.name,
-            model: () => this.props.model || "",
-            traceback: () => "",
-        });
-    },
-});
-
-patch(FormErrorDialog.prototype, {
-    setup() {
-        super.setup(...arguments);
-        setupErrorResolution(this, {
-            message: () => this.message,
-            exceptionName: () => this.props.data?.name,
-            model: () => "",
-            traceback: () => "",
-        });
-    },
-});
-
-// Server crashes (the "Oops!" dialog with a traceback). Client-side JavaScript errors are not sent.
-patch(RPCErrorDialog.prototype, {
-    setup() {
-        super.setup(...arguments);
-        setupErrorResolution(this, {
-            message: () => this.props.data?.message || this.props.message || "",
-            exceptionName: () => this.props.exceptionName || this.props.data?.name,
-            model: () => this.props.model || "",
-            traceback: () => this.props.data?.debug || "",
-        });
-    },
-});
+// Where each error dialog keeps its message, error type, model and (for server crashes) traceback.
+const dialogs = [
+    // Warnings, validation, access and missing-record errors.
+    [WarningDialog, (d) => d.message, (d) => d.props.exceptionName || d.props.data?.name, (d) => d.props.model, () => ""],
+    // Warnings with a button to another screen.
+    [RedirectWarningDialog, (d) => d.message, (d) => d.props.exceptionName || d.props.data?.name, (d) => d.props.model, () => ""],
+    // "Oh snap!" when saving a form fails.
+    [FormErrorDialog, (d) => d.message, (d) => d.props.data?.name, () => "", () => ""],
+    // Server crashes (the "Oops!" dialog with a traceback). Client-side JavaScript errors are not sent.
+    [
+        RPCErrorDialog,
+        (d) => d.props.data?.message || d.props.message || "",
+        (d) => d.props.exceptionName || d.props.data?.name,
+        (d) => d.props.model,
+        (d) => d.props.data?.debug || "",
+    ],
+];
+for (const [Dialog, message, exceptionName, model, traceback] of dialogs) {
+    patch(Dialog.prototype, {
+        setup() {
+            super.setup(...arguments);
+            setupErrorResolution(this, {
+                message: () => message(this),
+                exceptionName: () => exceptionName(this),
+                model: () => model(this) || "",
+                traceback: () => traceback(this),
+            });
+        },
+    });
+}
