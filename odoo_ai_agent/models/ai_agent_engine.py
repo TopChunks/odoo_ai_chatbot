@@ -1280,8 +1280,10 @@ STYLE
             return self._tool_failed(state, step, call, _("There is no tool named %s.", name))
         if "__invalid_json__" in arguments:
             return self._tool_failed(state, step, call, _("The tool arguments were not valid JSON."))
+        effective = []
         if isinstance(arguments.get("domain"), list):
             arguments["domain"] = self._empty_related(arguments.get("model"), self._repair_domain(arguments["domain"]))
+            arguments["domain"], effective = self._effective_members(arguments.get("model"), arguments["domain"])
             wrong = self._wrong_selection(arguments.get("model"), arguments["domain"])
             if wrong:
                 return self._tool_failed(state, step, call, wrong)
@@ -1353,6 +1355,10 @@ STYLE
         except Exception as err:  # noqa: BLE001 - the AI gets a clean message, the log gets the details
             _logger.warning("AI Agent: tool %s failed", name, exc_info=True)
             return self._tool_failed(state, step, call, error_sanitizer.sanitize_exception(err, f"AI Agent tool {name}"))
+        if effective and isinstance(result, str):
+            result += (" Note: filtered on " + ", ".join(f"{new} instead of {old}" for old, new in effective)
+                       + " (effective membership, including groups implied by other groups, as the user form and "
+                       "Settings show it).")
         self._note(state, call, result)
         return result
 
@@ -1635,6 +1641,32 @@ STYLE
             else:
                 result.append(term)
         return result
+
+    @api.model
+    def _effective_members(self, model, domain):
+        """Filter on effective membership: Odoo keeps direct links (group_ids, user_ids, implied_ids) next to
+        all_* fields that also follow implied groups. "Has this user got Variants?" is answered by all_group_ids
+        (as the user form and Settings show it); the direct field misses access given through another group.
+
+        Generic: any many2many field X with a searchable all_X to the same model is switched. Returns
+        (domain, [(X, all_X)...]).
+        """
+        if not model or model not in self.env:
+            return domain, []
+        fields = self.env[model]._fields
+        switched, out = [], []
+        for term in domain:
+            if isinstance(term, (list, tuple)) and len(term) == 3 and isinstance(term[0], str):
+                path = term[0].split(".")
+                field = fields.get(path[0])
+                twin = fields.get(f"all_{path[0]}")
+                if (field is not None and twin is not None and field.type == "many2many"
+                        and twin.type == "many2many" and twin.comodel_name == field.comodel_name
+                        and (twin.store or twin.search)):
+                    switched.append((path[0], twin.name))
+                    term = [".".join([twin.name] + path[1:]), term[1], term[2]]
+            out.append(term)
+        return out, list(dict.fromkeys(switched))
 
     @staticmethod
     def _repair_domain(domain):
@@ -2882,7 +2914,9 @@ STYLE
             shown.add(target.id)
             state["blocks"].append({"type": "app", "id": uuid.uuid4().hex, "apps": [app]})
         found = "" if not arguments.get("menu") or target != root else f" No menu matching '{arguments['menu']}' was found, so the app itself opens."
-        return f"Shown to the user: a clickable '{path}' app card with the app icon; it opens that screen.{found}"
+        return (f"Shown to the user: a clickable '{path}' app card with the app icon, under your answer. Nothing is "
+                "open yet: the screen opens only when the user clicks the card, so say 'click the card below to open "
+                f"it' and never that the page is open.{found}")
 
     def _access_levels(self, user, hierarchy):
         """(section, access, level) rows of the user form's Access Rights tab for this user."""
