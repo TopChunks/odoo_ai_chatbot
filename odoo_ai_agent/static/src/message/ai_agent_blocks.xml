@@ -65,7 +65,11 @@
                                 <div class="small"><b t-esc="msg.author"/> <span class="badge text-bg-light border ms-1" t-esc="msg.kind"/> <span class="text-muted ms-1" t-esc="msg.date"/></div>
                                 <div class="o-ai-agent-historyText" t-esc="msg.text"/>
                             </div>
-                            <div t-if="!record.messages.length" class="text-muted small">No messages.</div>
+                            <div t-if="!record.messages.length" class="text-muted small">
+                                No messages, emails or notes.
+                                <t t-if="record.updates_text"> <t t-esc="record.updates_text"/></t>
+                            </div>
+                            <div t-elif="record.updates_text" class="text-muted small mt-1" t-esc="record.updates_text"/>
                         </div>
                     </div>
                 </div>

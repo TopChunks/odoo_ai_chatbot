@@ -3974,6 +3974,7 @@ STYLE
         by_record = {record.id: [] for record in records}
         for message in messages:
             by_record[message.res_id].append(message)
+        updates = self._automatic_updates(model, records)
         entries = []
         for record in records:
             kept = by_record[record.id][-HISTORY_MESSAGE_CAP:]
@@ -3983,6 +3984,8 @@ STYLE
                 "name": record.display_name,
                 "responsible": responsible,
                 "total": len(by_record[record.id]),
+                # What else the chatter shows: Odoo's own automatic entries (no values, only which fields changed).
+                "updates_text": updates.get(record.id, ""),
                 "messages": [{
                     "date": fields.Datetime.context_timestamp(in_user_tz, m.date).strftime("%Y-%m-%d %H:%M"),
                     "author": m.author_id.name or m.email_from or _("Unknown"),
@@ -3993,7 +3996,9 @@ STYLE
         label = self._model_label(model)
         ref = self._ai_add_result(state, {"type": "history", "id": uuid.uuid4().hex, "title": _("Conversation history"),
                                      "model": model, "model_label": label, "records": entries})
-        counts = f"[{ref}] " + ", ".join(f"{e['name']} (ID {e['id']}): {e['total']} messages" for e in entries)
+        counts = f"[{ref}] " + ", ".join(
+            f"{e['name']} (ID {e['id']}): {e['total']} messages" + (f" ({e['updates_text']})" if e["updates_text"] else "")
+            for e in entries)
         if not config["share_data"]:
             if self.env.user.has_group("odoo_ai_agent.group_ai_agent_manager"):
                 notice = _("The AI can show conversations but not read them, so it cannot summarise or rate them. To "
@@ -4001,7 +4006,9 @@ STYLE
                            "Configuration > Settings.")
             else:
                 notice = _("Your administrator has not enabled this for you.")
-            self._add_notice(state, notice)
+            written = any(e["total"] for e in entries)
+            if written:  # only when there is message text the AI is not allowed to read
+                self._add_notice(state, notice)
             people = records.mapped("user_id") if "user_id" in records._fields else self.env["res.users"]
             if model == "crm.lead" and people and RATING_INTENT.search(state.get("question") or "") \
                     and not state.get("stats_added"):
@@ -4013,6 +4020,12 @@ STYLE
                         f"and above it Odoo's measurable comparison: {stats} Answer with that comparison (name its "
                         f"criteria, say the best score is highlighted below it); the histories are extra detail you "
                         f"cannot read, so do not summarise them.{salesperson_note}")
+            if not written:
+                # Nothing written on these records: no message text exists, so nothing is hidden from the AI.
+                return (f"SHOWN TO THE USER: the history of {len(entries)} {label} records ({counts}). No messages, "
+                        "emails or notes were written on them; the chatter only has Odoo's automatic updates listed "
+                        "there. Say that plainly, and name those automatic updates in a few words if there are any."
+                        f"{salesperson_note}")
             return (f"SHOWN TO THE USER: the conversation history of {len(entries)} {label} records is shown below "
                     f"your text ({counts}); say so. Sharing record values is off, so you cannot read, "
                     f"summarise or rate its text. If the user wants salespeople rated on reply speed, unanswered "
@@ -4033,6 +4046,33 @@ STYLE
     # ------------------------------------------------------------------
     # Salesperson conversation statistics: computed by Odoo, no message text needed
     # ------------------------------------------------------------------
+    @api.model
+    def _automatic_updates(self, model, records):
+        """{record id: "Automatic updates only: ..."} for the chatter entries Odoo writes itself (record created,
+        tracked field changes, stage changes). Only the changed fields are named, never their values."""
+        notifications = self.env["mail.message"].search([
+            ("model", "=", model), ("res_id", "in", records.ids), ("message_type", "=", "notification"),
+        ], order="date asc, id asc")
+        out = {}
+        for record in records:
+            mine = notifications.filtered(lambda m, rid=record.id: m.res_id == rid)
+            if not mine:
+                continue
+            tracked = mine.filtered("tracking_value_ids")
+            labels = list(dict.fromkeys(
+                (t.field_id.field_description or t.field_id.name)
+                for t in tracked.sudo().tracking_value_ids if t.field_id))
+            parts = []
+            other = len(mine) - len(tracked)
+            if other:
+                parts.append(_("%s system message(s) such as \"record created\"", other) if other > 1
+                             else _("1 system message (for example \"record created\")"))
+            if tracked:
+                parts.append(_("%(count)s tracked change(s) to %(fields)s", count=len(tracked),
+                               fields=", ".join(labels[:6]) or _("fields")))
+            out[record.id] = _("Automatic updates in the chatter: %s.", "; ".join(parts))
+        return out
+
     @staticmethod
     def _conversation_score(row):
         """0-100, from behaviour only (no message text): see CONVERSATION_SCORE_TEXT."""
