@@ -307,6 +307,7 @@ HISTORY_MESSAGES = 16
 TRACE_NOTE_CAP = 600
 SHARED_TEXT_CAP = 12000
 SCHEMA_TEXT_CAP = 16000
+SCREEN_OUTLINE_CAP = 3000  # the screen outline added to get_fields
 MODEL_LIST_CAP = 150
 ACTION_TTL = timedelta(minutes=30)
 TIME_MARGIN = 8  # seconds kept free before the request deadline
@@ -1031,6 +1032,7 @@ HOW TO USE THE TOOLS
 - Win rate means won ÷ (won + lost) over opportunities only (type opportunity, archived lost ones included), by closing date; say so in one short phrase. Leads count only for a lead conversion rate or when the user asks to include them. Win rate or conversion per salesperson: use conversation_stats (its win_rate column) with all_salespeople or names, not your own aggregates.
 - In Sales, a quotation is a sale.order in state draft or sent; a confirmed sales order is in state sale. "Latest quotation" means the newest draft or sent one. In Purchase, an RFQ (request for quotation) is a purchase.order in state draft, sent or to approve; a purchase order is in state purchase or done.
 - The Settings / Administration access group is "Role / Administrator" (res.groups name "Administrator" without a privilege); the per-app "Administrator" groups are different. To answer who has an access, show the group's users (user_ids).
+- What a screen, tab or section contains, or whether a field or column exists there ("is Amount in the order lines?", "what is in the Other Info tab?"): call get_fields on that model first and answer from its 'HOW THE SCREENS SHOW THIS' part, with the labels the user sees; never answer such questions from memory.
 - Whether an option or feature is on, where or how to turn it on, or why a feature, field or button is missing: call find_setting first, then say clearly whether it is on or off and exactly where it is (App > Configuration > Settings > section > option); do not only explain how to do it on a record.
 - For a user's access rights, permissions or groups ("what access rights do I have", "what can Priya do", "who has Sales administrator access"), use user_access_rights: Odoo builds them exactly as on the user form. Use ir.model.access only when the user explicitly asks about model-level permissions (read, write, create or delete).
 - For relative dates (today, this week, this month, last 6 months, this quarter, next 7 days...), pass 'period' instead of writing dates; Odoo computes them.
@@ -2142,6 +2144,94 @@ STYLE
                 return {"content": [{"type": "text", "text": text}], "structuredContent": {"result": output}}
             return dict(getattr(self.env["mcp.mixin"], tool["method"])(**arguments))
 
+    @api.model
+    def _screen_outline(self, model):
+        """What the user sees for this model, read from its real screens (any model, custom ones included):
+        the tabs of its form with the labels shown there, and, for line models, the columns of the list they
+        appear in on their parent's form ("Order Lines" on a sales order: ... Disc.%, Amount)."""
+        from lxml import etree
+
+        def is_hidden(node):
+            return any(str(node.get(attr) or "").strip() in ("1", "True", "true")
+                       for attr in ("invisible", "column_invisible"))
+
+        def label(model_name, node):
+            field = self.env[model_name]._fields.get(node.get("name"))
+            return node.get("string") or (field.string if field else node.get("name"))
+
+        def columns(model_name, list_node):
+            out = []
+            for node in list_node.iterchildren("field"):
+                if node.get("name") and not is_hidden(node):
+                    out.append(f"{label(model_name, node)} [{node.get('name')}]")
+            return list(dict.fromkeys(out))
+
+        def form_arch(model_name):
+            try:
+                return etree.fromstring(self.env[model_name].get_view(view_type="form")["arch"])
+            except Exception:  # noqa: BLE001 - a model without a usable form view
+                return None
+
+        Model = self.env[model]
+        lines = []
+        form = form_arch(model)
+        if form is not None:
+            def top_fields(scope):
+                """Fields of this form (not of an embedded list) inside scope."""
+                return [n for n in scope.xpath(".//field[@name]") if not n.xpath("ancestor::field")
+                        and not is_hidden(n)]
+
+            def describe(node):
+                text = f"{label(model, node)} [{node.get('name')}]"
+                field = Model._fields.get(node.get("name"))
+                inline = node.xpath("./list | ./tree")
+                if field is not None and field.type in ("one2many", "many2many") and inline:
+                    text += f" (a list with columns: {', '.join(columns(field.comodel_name, inline[0]))})"
+                return text
+
+            tree = form.getroottree()
+            pages = [p for p in form.xpath("//page") if not is_hidden(p) and not p.xpath("ancestor::field")]
+            # lxml elements are not stable objects: compare them by their path in the form
+            in_pages = {tree.getpath(n) for p in pages for n in top_fields(p)}
+            main = [describe(n) for n in top_fields(form) if tree.getpath(n) not in in_pages]
+            if main:
+                lines.append("Main part of the form: " + ", ".join(dict.fromkeys(main)))
+            for page in pages:
+                title = f"Tab '{page.get('string') or page.get('name') or ''}'"
+                if page.get("invisible"):
+                    title += " (shown only in some cases)"
+                shown = [describe(n) for n in top_fields(page)]
+                panels = [w.get("name") for w in page.xpath(".//widget[@name]")]
+                if shown:
+                    lines.append(f"{title}: " + ", ".join(dict.fromkeys(shown)))
+                elif panels:
+                    lines.append(f"{title}: a special panel ({', '.join(dict.fromkeys(panels))}), no plain fields")
+        # A line model (sale.order.line): the list it is shown in on its parent's form, with its column labels.
+        for field in Model._fields.values():
+            if field.type != "many2one" or field.comodel_name not in self.env or field.comodel_name == model:
+                continue
+            parent = self.env[field.comodel_name]
+            o2m = [f for f in parent._fields.values() if f.type == "one2many" and f.comodel_name == model
+                   and f.inverse_name == field.name]
+            if not o2m:
+                continue
+            parent_form = form_arch(field.comodel_name)
+            if parent_form is None:
+                continue
+            for line_field in o2m[:2]:
+                for node in parent_form.xpath(f"//field[@name='{line_field.name}']")[:1]:
+                    inline = node.xpath("./list | ./tree")
+                    if inline:
+                        lines.append(f"Shown as '{label(field.comodel_name, node)}' on the "
+                                     f"{self._model_label(field.comodel_name)} form, with columns: "
+                                     + ", ".join(columns(model, inline[0])))
+        if not lines:
+            return ""
+        text = "\n".join(lines)[:SCREEN_OUTLINE_CAP]
+        return ("\n\nHOW THE SCREENS SHOW THIS (labels as the user sees them; [technical name]; a column can have "
+                "another label than the field, e.g. a Subtotal field shown as 'Amount'; some columns only show with "
+                "certain settings):\n" + text)
+
     def _call_mcp_readable(self, tool, arguments):
         """Run a read tool; when Odoo refuses it only because some asked-for fields are private for this user
         (an employee's wage, or a field of the private profile), leave those fields out and run it again.
@@ -2224,7 +2314,12 @@ STYLE
             result, left_out = self._call_mcp_readable(tool, arguments)
             text = self._result_text(result)
             if tool["kind"] == "schema":
-                return text[:SCHEMA_TEXT_CAP]
+                outline = ""
+                if name == "get_fields" and isinstance(arguments.get("model"), str) and arguments["model"] in self.env:
+                    # How the screens show these fields: their labels there can differ (price_subtotal is
+                    # "Amount" in the order lines), and the user talks about what they see.
+                    outline = self._screen_outline(arguments["model"])
+                return text[:SCHEMA_TEXT_CAP - len(outline)] + outline
             structured = result.get("structuredContent") or {}
         if name == "search_records":
             summary = self._block_table(arguments, structured, state, signature)
