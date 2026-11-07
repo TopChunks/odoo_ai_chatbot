@@ -356,6 +356,9 @@ ERROR_SOURCE_PLAIN = ("If the check comes from the custom code, say it is a rule
                       "the module by its title; do not mention file names, methods, line numbers or technical module "
                       "names. Only for a crash in the code, end with one line 'For your administrator:' and the "
                       "location as module/file:line in backticks, so the user can pass it on.")
+# Odoo refusing a read because of one field: "The fields "wage", which you are trying to read, are not available
+# for employee public profiles." or "You do not have enough rights to access the field "version_id" on ...".
+FIELD_ACCESS_ERROR = re.compile(r"which you are trying to read|enough rights to access the field", re.IGNORECASE)
 # Errors Odoo shows in a dialog that the user can get AI help for (a crash needs its traceback as well).
 ERROR_HELP_EXCEPTIONS = {
     "odoo.exceptions.ValidationError", "odoo.exceptions.UserError", "odoo.exceptions.AccessError",
@@ -1904,6 +1907,45 @@ STYLE
                 return {"content": [{"type": "text", "text": text}], "structuredContent": {"result": output}}
             return dict(getattr(self.env["mcp.mixin"], tool["method"])(**arguments))
 
+    def _call_mcp_readable(self, tool, arguments):
+        """Run a read tool; when Odoo refuses it only because some asked-for fields are private for this user
+        (an employee's wage, or a field of the private profile), leave those fields out and run it again.
+
+        Returns (result, note for the AI). If every field is blocked, the original error is raised unchanged, so
+        a question about private data is still refused.
+        """
+        try:
+            return self._call_mcp(tool, arguments), ""
+        except AccessError as err:
+            fields = arguments.get("fields")
+            message = str(err.args[0] if err.args else err)
+            if (tool["name"] not in ("search_records", "get_record") or not isinstance(fields, list)
+                    or len(fields) < 2 or not FIELD_ACCESS_ERROR.search(message)):
+                raise
+            blocked = []
+            for field in fields:
+                probe = dict(arguments, fields=[field])
+                if tool["name"] == "search_records":
+                    probe["limit"] = 1
+                try:
+                    self._call_mcp(tool, probe)
+                except AccessError:
+                    blocked.append(field)
+            readable = [f for f in fields if f not in blocked]
+            if not blocked or not readable:
+                raise err from None
+            arguments["fields"] = readable
+            result = self._call_mcp(tool, arguments)
+        model = arguments.get("model")
+        labels = blocked
+        if model in self.env:
+            # sudo: only the field labels ("Private Street"), which Odoo hides along with the private values.
+            meta = self.env[model].sudo().fields_get(blocked, attributes=["string"])
+            labels = [meta.get(f, {}).get("string") or f for f in blocked]
+        return result, (f" Not readable for this user under Odoo's access rights, so left out: {', '.join(labels)}. "
+                        "Every other asked-for field is shown. Mention the left-out ones only if the user asked for "
+                        "them (say they are private to HR or restricted); do not say other fields failed.")
+
     @staticmethod
     def _result_text(result):
         return "\n".join(
@@ -1938,12 +1980,13 @@ STYLE
                 arguments.pop(key, None)
         sort_after = []
         dropped = self._drop_unsortable(arguments, sort_after)
+        left_out = ""
         if name == "aggregate_records" and not arguments.get("groupby"):
             arguments.pop("groupby", None)
             structured = self._aggregate_totals(arguments)
             text = json.dumps(structured["groups"], ensure_ascii=False, default=str)
         else:
-            result = self._call_mcp(tool, arguments)
+            result, left_out = self._call_mcp_readable(tool, arguments)
             text = self._result_text(result)
             if tool["kind"] == "schema":
                 return text[:SCHEMA_TEXT_CAP]
@@ -1960,7 +2003,7 @@ STYLE
             summary = self._block_attachments(structured, state, signature)
         else:
             summary = self._block_text(name, text, state, signature)
-        summary += dropped
+        summary += dropped + left_out
         if config["share_data"]:
             summary += "\n\nRESULT (also shown to the user):\n" + text[:SHARED_TEXT_CAP]
         return summary
@@ -2163,6 +2206,7 @@ STYLE
         model = structured.get("model")
         rows = (structured.get("records") or [])[:TABLE_ROW_CAP]
         total = structured.get("total", len(rows))
+        rows, total = self._word_start_matches(arguments, rows, total)
         label = self._model_label(model)
         names = []
         for row in rows:
@@ -2269,6 +2313,28 @@ STYLE
                 if isinstance(term, (list, tuple)) and len(term) == 3 and isinstance(term[2], str)
                 and term[1] in ("ilike", "=", "=ilike") and term[0] in ("name", "display_name", "complete_name", "title")
                 and len(term[2].strip()) >= 3}
+
+    @api.model
+    def _word_start_matches(self, arguments, rows, total):
+        """"Ravi" also finds "Travis" (Odoo searches inside words): when some names start a word with what the
+        user wrote, keep only those. Nothing is dropped when no name does (a real partial search)."""
+        names = self._searched_names(self.env["mcp.mixin"]._coerce_domain(arguments.get("domain")) or [])
+        if len(names) != 1 or len(rows) < 2:
+            return rows, total
+        word = next(iter(names))
+        if not re.fullmatch(r"[^\W\d_]{3,}", word):
+            return rows, total  # one plain word only, not a reference like "MB-200" or a phrase
+        starts = re.compile(r"(?<![^\W\d_])" + re.escape(word), re.IGNORECASE)
+
+        def name_of(row):
+            return str(row.get("name") or row.get("display_name") or row.get("complete_name") or row.get("title") or "")
+
+        if not all(name_of(row) for row in rows):
+            return rows, total
+        kept = [row for row in rows if starts.search(name_of(row))]
+        if not kept or len(kept) == len(rows):
+            return rows, total
+        return kept, max(len(kept), total - (len(rows) - len(kept)))
 
     @api.model
     def _exact_name(self, model, arguments, ids):
