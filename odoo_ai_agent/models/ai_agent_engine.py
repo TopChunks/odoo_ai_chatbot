@@ -2162,7 +2162,7 @@ STYLE
         def columns(model_name, list_node):
             out = []
             for node in list_node.iterchildren("field"):
-                if node.get("name") and not is_hidden(node):
+                if node.get("name") and not is_hidden(node) and str(label(model_name, node) or "").strip():
                     out.append(f"{label(model_name, node)} [{node.get('name')}]")
             return list(dict.fromkeys(out))
 
@@ -2179,7 +2179,7 @@ STYLE
             def top_fields(scope):
                 """Fields of this form (not of an embedded list) inside scope."""
                 return [n for n in scope.xpath(".//field[@name]") if not n.xpath("ancestor::field")
-                        and not is_hidden(n)]
+                        and not is_hidden(n) and str(label(model, n) or "").strip()]  # unlabelled helpers left out
 
             def describe(node):
                 text = f"{label(model, node)} [{node.get('name')}]"
@@ -2202,7 +2202,21 @@ STYLE
                     title += " (shown only in some cases)"
                 shown = [describe(n) for n in top_fields(page)]
                 panels = [w.get("name") for w in page.xpath(".//widget[@name]")]
-                if shown:
+                # The tab's titled sections ("Sales", "Delivery", "Invoicing", "Tracking"), as on the screen.
+                sections = [g for g in page.xpath(".//group[@string]") if not g.xpath("ancestor::field")
+                            and not is_hidden(g) and not g.xpath("ancestor::group[@string]")]
+                if shown and sections:
+                    placed, parts = set(), []
+                    for group in sections:
+                        names = [n for n in top_fields(group)]
+                        placed |= {tree.getpath(n) for n in names}
+                        if names:
+                            parts.append(f"{group.get('string')}: " + ", ".join(dict.fromkeys(describe(n) for n in names)))
+                    rest = [describe(n) for n in top_fields(page) if tree.getpath(n) not in placed]
+                    if rest:
+                        parts.append("Other: " + ", ".join(dict.fromkeys(rest)))
+                    lines.append(f"{title}, in sections: " + " | ".join(parts))
+                elif shown:
                     lines.append(f"{title}: " + ", ".join(dict.fromkeys(shown)))
                 elif panels:
                     lines.append(f"{title}: a special panel ({', '.join(dict.fromkeys(panels))}), no plain fields")
