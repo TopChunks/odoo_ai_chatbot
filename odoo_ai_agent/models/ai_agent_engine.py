@@ -410,6 +410,9 @@ CANT_SEE = re.compile(r"\s*[^.!?\n]*\bI (?:can't|cannot|can not|don't|do not) (?
                       re.IGNORECASE)
 # Sentences that hand the reading back to the user, removed when data sharing is off (in this order).
 HANDBACK_FILTERS = (CANT_SEE, YOURSELF, HANDBACK, IN_TABLE)
+# The reason of a refusal: such a sentence answers the question and is never removed as a hand-back.
+REFUSAL_REASON = re.compile(r"\b(?:access|rights?|permission|allowed|private|restricted|confidential|not enabled)\b",
+                            re.IGNORECASE)
 FINAL_STEP_NOTE = (
     "\n\nNO TOOL STEPS LEFT: write the final answer now from the results you already have (Odoo shows them to the user). "
     "If something could not be found, say so in one sentence."
@@ -4852,7 +4855,9 @@ STYLE
         text = self._paid_verdict(state.get("question") or "", text)
         if not (config or {}).get("share_data") and state.get("blocks"):
             for pattern in HANDBACK_FILTERS:
-                text = pattern.sub("", text)
+                # A refusal with its reason ("I can't see his opportunities: your access rights...") is an answer,
+                # not a hand-back: keep it.
+                text = pattern.sub(lambda m: m.group(0) if REFUSAL_REASON.search(m.group(0)) else "", text)
             text = text.strip()
         body = self._markdown(text)
         if error and not body:
