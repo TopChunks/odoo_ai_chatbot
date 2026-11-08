@@ -452,7 +452,7 @@ C:\Odoo>venv\Scripts\activate
 
 **3.** Refresh the browser with **Ctrl + Shift + R**.
 
-> 💡 Instead of step 3, you can start Odoo normally and click **Apps** → search **AI Agent** → **⋮** → **Upgrade**.
+> 💡 Instead of the `-u odoo_ai_agent` command, you can start Odoo normally and click **Apps** → search **AI Agent** → **⋮** → **Upgrade**.
 
 On Linux: `git pull origin main` in the module folder, restart Odoo, then **Upgrade** in Apps.
 
