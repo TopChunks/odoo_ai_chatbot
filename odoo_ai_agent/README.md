@@ -77,28 +77,33 @@ Most "AI for Odoo" tools copy your records (customers, prices, invoices, salarie
 
 ## 3. Installation, step by step (Windows)
 
-First, find out how your Odoo is installed. The steps are the same, only the folders differ:
+This guide uses the usual Windows layout where Odoo runs from its source code:
 
-| | **Odoo Windows installer** (most common) | **Source install** (developers) |
-|---|---|---|
-| Odoo folder | `C:\Program Files\Odoo 19.0.xxxxxxxx\` (the date differs) | Where you cloned Odoo, e.g. `C:\Odoo\odoo` |
-| Configuration file | `C:\Program Files\Odoo 19.0.xxxxxxxx\server\odoo.conf` | Your own file, e.g. `C:\Odoo\odoo.conf` |
-| Odoo's Python | `C:\Program Files\Odoo 19.0.xxxxxxxx\python\python.exe` | Your virtual environment, e.g. `C:\Odoo\venv\Scripts\python.exe` |
-| How Odoo runs | A Windows service called **odoo-server-19.0** | A command window running `odoo-bin` |
+```
+C:\Odoo\
+├── odoo\              ← Odoo 19 source code (contains odoo-bin)
+├── custom-addons\     ← your extra modules go here
+├── venv\              ← Odoo's Python environment
+└── odoo.conf          ← Odoo configuration file
+```
 
-> 💡 Open the **Command Prompt as administrator** for these steps: Start menu → type `cmd` → right-click **Command Prompt** → **Run as administrator**. The installer's folders are inside *Program Files*, which needs administrator rights.
+If your folders have other names, use your own paths in the commands below.
 
 ### Step 1: Install Git for Windows
 
-Download it from **https://git-scm.com/download/win** and install it with the default options. To check, open a new Command Prompt and type `git --version`.
+Download it from **https://git-scm.com/download/win** and install it with the default options. To check, open a **new** Command Prompt and type:
 
-### Step 2: Create a folder for your extra modules
+```bat
+git --version
+```
+
+### Step 2: Create the custom-addons folder
 
 Keep extra modules **outside** Odoo's own folder, so Odoo updates never overwrite them.
 
 ```bat
-mkdir C:\odoo-custom-addons
-cd /d C:\odoo-custom-addons
+mkdir C:\Odoo\custom-addons
+cd /d C:\Odoo\custom-addons
 ```
 
 ### Step 3: Get AI Agent with git
@@ -109,59 +114,53 @@ git remote add origin https://github.com/TopChunks/odoo_ai_chatbot.git
 git pull origin main
 ```
 
-You now have `C:\odoo-custom-addons\odoo_ai_agent\`.
+You now have `C:\Odoo\custom-addons\odoo_ai_agent\`.
 
 ### Step 4: Add the MCP Server module
 
 Download **MCP Server** for Odoo 19 from the [Odoo Apps store](https://apps.odoo.com/apps/modules/19.0/mcp_server), unzip it, and put the `mcp_server` folder **next to** `odoo_ai_agent`:
 
 ```
-C:\odoo-custom-addons\
+C:\Odoo\custom-addons\
 ├── odoo_ai_agent\      ← AI Agent
 └── mcp_server\         ← MCP Server
 ```
 
-> ⚠️ After unzipping, check that you don't have a folder inside a folder (`mcp_server\mcp_server\`). The folder that contains `__manifest__.py` must sit directly in `C:\odoo-custom-addons\`.
+> ⚠️ After unzipping, check that you don't have a folder inside a folder (`mcp_server\mcp_server\`). The folder that contains `__manifest__.py` must sit directly in `C:\Odoo\custom-addons\`.
 
 ### Step 5: Install the Python packages
 
-Use **Odoo's own Python** (from the table above), not another Python on your PC.
+Activate Odoo's Python environment, then install the packages into it:
 
-Odoo Windows installer (keep the quotes; replace `xxxxxxxx` with your folder's date):
 ```bat
-"C:\Program Files\Odoo 19.0.xxxxxxxx\python\python.exe" -m pip install authlib defusedxml packaging markdown2
+C:\Odoo\venv\Scripts\activate
+pip install authlib defusedxml packaging markdown2
 ```
 
-Source install:
-```bat
-C:\Odoo\venv\Scripts\python.exe -m pip install authlib defusedxml packaging markdown2
-```
+> 💡 After `activate`, the prompt starts with `(venv)`. That means `python` and `pip` now use **Odoo's** Python, not another Python on your PC.
 
 ### Step 6: Tell Odoo where the folder is
 
-Open the configuration file in **Notepad as administrator** (Start menu → type *Notepad* → right-click → **Run as administrator** → *File → Open* → choose *All files*). Find the `addons_path` line and **add** your folder at the end, after a comma. Keep the paths that are already there:
+Open `C:\Odoo\odoo.conf` in Notepad. Find the `addons_path` line and **add** `C:\Odoo\custom-addons` at the end, after a comma. Keep the paths that are already there:
 
 ```ini
 [options]
-addons_path = C:\Program Files\Odoo 19.0.xxxxxxxx\server\odoo\addons,C:\odoo-custom-addons
+addons_path = C:\Odoo\odoo\odoo\addons,C:\Odoo\odoo\addons,C:\Odoo\custom-addons
 ```
 
 Save the file.
 
-### Step 7: Restart Odoo
+### Step 7: Start (or restart) Odoo
 
-Odoo Windows installer: press **Win + R**, type `services.msc`, find **odoo-server-19.0**, right-click → **Restart**.
-Or, in the administrator Command Prompt:
-```bat
-net stop odoo-server-19.0
-net start odoo-server-19.0
-```
+If Odoo is already running, stop it first with **Ctrl + C** in its window. Then start it:
 
-Source install: stop Odoo with **Ctrl + C** in its window, then start it again:
 ```bat
 cd /d C:\Odoo\odoo
-C:\Odoo\venv\Scripts\python.exe odoo-bin -c C:\Odoo\odoo.conf
+C:\Odoo\venv\Scripts\activate
+python odoo-bin -c C:\Odoo\odoo.conf
 ```
+
+Leave this window open: Odoo runs as long as it is open, and shows its log here. Open Odoo in your browser at **http://localhost:8069**.
 
 ### Step 8: Install the module in Odoo
 
@@ -398,32 +397,32 @@ Tips:
 
 ## 12. Updating to a new version
 
-In the administrator Command Prompt:
+**1. Get the new code:**
 
 ```bat
-cd /d C:\odoo-custom-addons
+cd /d C:\Odoo\custom-addons
 git pull origin main
 ```
 
-Restart Odoo (Step 7 of the installation), then in Odoo: **Apps** → search **AI Agent** → **⋮** → **Upgrade**.
+**2. Stop Odoo** with **Ctrl + C** in its window.
 
-Or upgrade from the command line. Stop Odoo first; the command stops by itself when it's done. Then start Odoo normally.
+**3. Upgrade the module.** Replace `YOUR_DATABASE` with your database name. The command stops by itself when it's done:
 
-Odoo Windows installer:
-```bat
-net stop odoo-server-19.0
-cd /d "C:\Program Files\Odoo 19.0.xxxxxxxx\server"
-..\python\python.exe odoo-bin -c odoo.conf -d YOUR_DATABASE -u odoo_ai_agent --stop-after-init
-net start odoo-server-19.0
-```
-
-Source install:
 ```bat
 cd /d C:\Odoo\odoo
-C:\Odoo\venv\Scripts\python.exe odoo-bin -c C:\Odoo\odoo.conf -d YOUR_DATABASE -u odoo_ai_agent --stop-after-init
+C:\Odoo\venv\Scripts\activate
+python odoo-bin -c C:\Odoo\odoo.conf -d YOUR_DATABASE -u odoo_ai_agent --stop-after-init
 ```
 
-On Linux: `git pull origin main` in the module folder, then `sudo systemctl restart odoo`, then **Upgrade** in Apps.
+**4. Start Odoo again**, then refresh the browser with **Ctrl + Shift + R**:
+
+```bat
+python odoo-bin -c C:\Odoo\odoo.conf
+```
+
+> 💡 Instead of step 3, you can start Odoo normally and click **Apps** → search **AI Agent** → **⋮** → **Upgrade**.
+
+On Linux: `git pull origin main` in the module folder, restart Odoo, then **Upgrade** in Apps.
 
 > 💡 If you use **Custom business-flow answers**, click **Index installed custom modules** again after you update your custom modules.
 
@@ -436,11 +435,12 @@ On Linux: `git pull origin main` in the module folder, then `sudo systemctl rest
 | Problem | Fix |
 |---|---|
 | **AI Agent isn't in Apps** | Check `addons_path` in the config file, restart Odoo, then **Apps → Update Apps List**, and remove the *Apps* filter when searching. |
-| **"MCP Server" missing when installing** | Put the `mcp_server` folder next to `odoo_ai_agent` (same `C:\odoo-custom-addons` folder, no folder-inside-a-folder) and update the apps list. |
-| **Installation error about a Python module** | Install the packages with **Odoo's own Python** (Step 5). Installing them with another Python on your PC doesn't help Odoo. |
-| **"Access is denied" when saving odoo.conf or running pip** | Run Notepad / Command Prompt **as administrator**. |
+| **"MCP Server" missing when installing** | Put the `mcp_server` folder next to `odoo_ai_agent` (same `C:\Odoo\custom-addons` folder, no folder-inside-a-folder) and update the apps list. |
+| **Installation error about a Python module** | Run `C:\Odoo\venv\Scripts\activate` first, then `pip install` (Step 5). Packages installed into another Python on your PC don't help Odoo. |
+| **`python` is not recognized, or the wrong Python runs** | Run `C:\Odoo\venv\Scripts\activate` first: the prompt then starts with `(venv)`. |
 | **`git` is not recognized** | Install Git for Windows, then open a **new** Command Prompt. |
-| **The odoo-server-19.0 service won't start** | Usually a typo in `odoo.conf` (check commas in `addons_path`). Look at the log file (below) for the exact error. |
+| **Odoo stops right after starting** | Usually a typo in `odoo.conf` (check the commas in `addons_path`). The exact error is shown in the Odoo window. |
+| **"Address already in use" (port 8069)** | Odoo is already running in another window. Stop it there (Ctrl + C) and start again. |
 | **"No AI model is selected"** | Settings → choose a provider, paste the key, **Refresh available models**, choose a model, **Save**. |
 | **"Invalid API key" / "401"** | The key is wrong, expired, or belongs to another provider. Create a new one in the provider's console. |
 | **"Quota exceeded" / "429" / "insufficient credit"** | Add credit or raise the limit in the provider's billing page, or wait a minute and retry. |
@@ -450,22 +450,20 @@ On Linux: `git pull origin main` in the module folder, then `sudo systemctl rest
 | **"You don't have access to…"** | Working as intended: the user's Odoo rights don't allow it. Change the user's access rights if they should. |
 | **The user can't see AI Agent** | Give them **Access Rights → AI Agent → User**. |
 | **No "Resolve with AI" button on errors** | Switch on **Resolve errors with AI** in the settings, and refresh the browser. |
-| **Changes in the code don't show** | Restart Odoo (service or command window), then upgrade the module (section 12) and hard-refresh the browser (Ctrl+Shift+R). |
+| **Changes in the code don't show** | Stop Odoo (Ctrl + C), upgrade the module and start it again (section 12), then hard-refresh the browser (Ctrl + Shift + R). |
 | **The answer looks wrong** | Check the table or chart under the answer (that's Odoo's real data) and **Data used**; ask again more precisely, or try a stronger model. |
 
 ### Where to look
 
-- **Odoo log file:**
-  - Odoo Windows installer: `C:\Program Files\Odoo 19.0.xxxxxxxx\server\odoo.log` (or the `logfile` line in `odoo.conf`).
-  - Source install: the command window where Odoo runs, or the `logfile` set in your `odoo.conf`.
-  - To follow only AI Agent lines live, in **PowerShell**:
-    ```powershell
-    Get-Content "C:\Program Files\Odoo 19.0.xxxxxxxx\server\odoo.log" -Wait -Tail 50 | Select-String "AI Agent"
-    ```
+- **The Odoo window:** Odoo started with `python odoo-bin -c C:\Odoo\odoo.conf` shows its log in that window. Problems appear as `ERROR` lines, with the details below them.
+- **Log to a file instead:** set `logfile = C:\Odoo\odoo.log` in `odoo.conf` and restart Odoo. Then follow only the AI Agent lines in **PowerShell**:
+  ```powershell
+  Get-Content C:\Odoo\odoo.log -Wait -Tail 50 | Select-String "AI Agent"
+  ```
 - **"Data used" under an answer** shows each step the AI took and the results Odoo produced: the first place to look when an answer seems wrong.
-- **More detail in the log:** add this line to `odoo.conf` and restart Odoo, to see every step, including ones that were skipped on purpose (remove it again afterwards):
-  ```ini
-  log_handler = :INFO,odoo.addons.odoo_ai_agent:DEBUG
+- **More detail in the log:** start Odoo with this extra option to see every step, including ones that were skipped on purpose:
+  ```bat
+  python odoo-bin -c C:\Odoo\odoo.conf --log-handler=odoo.addons.odoo_ai_agent:DEBUG
   ```
 - **Usage & Cost** shows failed requests and their error messages per user and model.
 - **MCP Server logs** (in its menu) list every tool call with its result, user and time.
