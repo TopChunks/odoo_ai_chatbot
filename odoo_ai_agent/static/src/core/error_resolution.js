@@ -53,7 +53,7 @@ function failedCall(model) {
  */
 function setupErrorResolution(component, { message, exceptionName, model, traceback }) {
     component.aiResolution = useState({
-        enabled: false, loading: false, answer: "", answerHtml: "", error: "", sources: [], codeChecked: false,
+        enabled: false, loading: false, answer: "", answerHtml: "", error: "", sources: [], codeChecked: false, token: "",
     });
     const store = useService("mail.store");
     const name = exceptionName() || "";
@@ -79,6 +79,7 @@ function setupErrorResolution(component, { message, exceptionName, model, traceb
             component.aiResolution.answerHtml = markup(result.answer_html || "");
             component.aiResolution.sources = result.sources || [];
             component.aiResolution.codeChecked = Boolean(result.code_checked);
+            component.aiResolution.token = result.token || "";
         } catch {
             component.aiResolution.error = _t(
                 "The AI could not analyse this error. Check the AI Agent settings and try again."
@@ -88,9 +89,10 @@ function setupErrorResolution(component, { message, exceptionName, model, traceb
         }
     };
     component.continueInAiAgent = async () => {
+        // Only the token: the server posts the error and the help it kept, never texts sent from here.
         const { channel } = await store.fetchStoreData(
             "/ai_agent/error_conversation",
-            { message: String(message() || "").slice(0, 1500), answer: component.aiResolution.answer },
+            { token: component.aiResolution.token },
             { readonly: false, requestData: true }
         );
         component.props.close?.();

@@ -1,12 +1,16 @@
+import uuid
+
 from werkzeug.exceptions import NotFound
 
-from odoo import http
+from odoo import _, http
 from odoo.exceptions import AccessError, UserError
 from odoo.http import content_disposition, request
 
 from odoo.addons.mail.controllers.webclient import WebclientController
 from odoo.addons.mail.tools.discuss import Store
 
+# Session key of the AI help given on error dialogs, for "Continue in AI Agent".
+ERROR_HELP_KEY = "ai_agent_error_help"
 # pg advisory lock namespace ("AIAG"): one answer at a time per conversation.
 ANSWER_LOCK = 0x41494147
 
@@ -19,9 +23,12 @@ class AiAgentWebclient(WebclientController):
             channel = request.env["discuss.channel"]._ai_agent_get_or_create_conversation()
             store.add(channel).resolve_data_request(channel=Store.One(channel, []))
         if name == "/ai_agent/error_conversation":
-            # "Continue in AI Agent" from an error dialog: a new conversation with the error and the AI's help.
-            channel = request.env["discuss.channel"]._ai_agent_error_conversation(
-                str(params.get("message") or ""), str(params.get("answer") or ""))
+            # "Continue in AI Agent" from an error dialog: a new conversation with the error and the AI's help, as
+            # kept on the server when it was given (the browser only sends its token, never the texts).
+            help_given = (request.session.get(ERROR_HELP_KEY) or {}).get(str(params.get("token") or ""))
+            if not help_given:
+                raise UserError(_("This AI help is no longer available. Ask again from the error dialog."))
+            channel = request.env["discuss.channel"]._ai_agent_error_conversation(*help_given)
             store.add(channel).resolve_data_request(channel=Store.One(channel, []))
 
 
@@ -43,8 +50,14 @@ class AiAgentController(http.Controller):
             raise AccessError("AI Agent access is required.")
         if not isinstance(record_ids, list):
             record_ids = []
-        return request.env["ai_agent.engine"].resolve_validation_error(
+        result = request.env["ai_agent.engine"].resolve_validation_error(
             message, exception_name, model, method, record_ids, traceback)
+        # Kept in the user's session for "Continue in AI Agent" (the last few only).
+        kept = dict(list((request.session.get(ERROR_HELP_KEY) or {}).items())[-4:])
+        result["token"] = uuid.uuid4().hex
+        kept[result["token"]] = [str(message or "")[:1500], result.get("answer") or ""]
+        request.session[ERROR_HELP_KEY] = kept
+        return result
 
     @http.route("/ai_agent/answer", type="jsonrpc", auth="user")
     def answer(self, channel_id):
