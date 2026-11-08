@@ -5,6 +5,12 @@ from . import ai_agent_flow
 from . import discuss_channel
 from . import mail_message
 from . import ai_agent_engine
+from . import ai_agent_engine_checks
+from . import ai_agent_engine_read
+from . import ai_agent_engine_scope
+from . import ai_agent_engine_present
+from . import ai_agent_engine_history
+from . import ai_agent_engine_write
 from . import ai_agent_export
 from . import res_config_settings
 from . import ir_http
