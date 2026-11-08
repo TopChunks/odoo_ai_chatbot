@@ -130,11 +130,14 @@ C:\Odoo\custom-addons\
 
 ### Step 5: Install the Python packages
 
-Activate Odoo's Python environment, then install the packages into it:
+In Command Prompt, switch on Odoo's Python environment, then install the packages into it:
 
-```bat
-C:\Odoo\venv\Scripts\activate
-pip install authlib defusedxml packaging markdown2
+```
+C:\>cd Odoo
+
+C:\Odoo>venv\Scripts\activate
+
+(venv) C:\Odoo>pip install authlib defusedxml packaging markdown2
 ```
 
 > 💡 After `activate`, the prompt starts with `(venv)`. That means `python` and `pip` now use **Odoo's** Python, not another Python on your PC.
@@ -152,13 +155,33 @@ Save the file.
 
 ### Step 7: Start (or restart) Odoo
 
-If Odoo is already running, stop it first with **Ctrl + C** in its window. Then start it:
+If Odoo is already running, stop it first with **Ctrl + C** in its window.
 
-```bat
-cd /d C:\Odoo\odoo
-C:\Odoo\venv\Scripts\activate
-python odoo-bin -c C:\Odoo\odoo.conf
+Then open **Command Prompt** (Start menu → type `cmd` → **Command Prompt**). It opens in your user folder. Type the commands shown after each `>` and press **Enter** after each one:
+
 ```
+C:\Users\YourName>cd..
+
+C:\Users>cd..
+
+C:\>cd Odoo
+
+C:\Odoo>venv\Scripts\activate
+
+(venv) C:\Odoo>cd odoo
+
+(venv) C:\Odoo\odoo>python odoo-bin -c C:\Odoo\odoo.conf
+```
+
+What each command does:
+
+| Command | What it does |
+|---|---|
+| `cd..` (twice) | Goes up from your user folder to `C:\` |
+| `cd Odoo` | Goes into the `C:\Odoo` folder |
+| `venv\Scripts\activate` | Switches on Odoo's Python. The prompt now starts with `(venv)` |
+| `cd odoo` | Goes into the Odoo source folder, where `odoo-bin` is |
+| `python odoo-bin -c C:\Odoo\odoo.conf` | Starts Odoo with your configuration file |
 
 Leave this window open: Odoo runs as long as it is open, and shows its log here. Open Odoo in your browser at **http://localhost:8069**.
 
@@ -397,28 +420,37 @@ Tips:
 
 ## 12. Updating to a new version
 
-**1. Get the new code:**
+**1. Stop Odoo** with **Ctrl + C** in its window.
 
-```bat
-cd /d C:\Odoo\custom-addons
-git pull origin main
+**2. Get the new code, upgrade the module and start Odoo again.** Replace `YOUR_DATABASE` with your database name:
+
+```
+C:\Users\YourName>cd..
+
+C:\Users>cd..
+
+C:\>cd Odoo\custom-addons
+
+C:\Odoo\custom-addons>git pull origin main
+
+C:\Odoo\custom-addons>cd ..
+
+C:\Odoo>venv\Scripts\activate
+
+(venv) C:\Odoo>cd odoo
+
+(venv) C:\Odoo\odoo>python odoo-bin -c C:\Odoo\odoo.conf -d YOUR_DATABASE -u odoo_ai_agent --stop-after-init
+
+(venv) C:\Odoo\odoo>python odoo-bin -c C:\Odoo\odoo.conf
 ```
 
-**2. Stop Odoo** with **Ctrl + C** in its window.
+| Command | What it does |
+|---|---|
+| `git pull origin main` | Downloads the new version of AI Agent |
+| `... -u odoo_ai_agent --stop-after-init` | Upgrades AI Agent in your database, then stops by itself |
+| `python odoo-bin -c C:\Odoo\odoo.conf` | Starts Odoo normally again |
 
-**3. Upgrade the module.** Replace `YOUR_DATABASE` with your database name. The command stops by itself when it's done:
-
-```bat
-cd /d C:\Odoo\odoo
-C:\Odoo\venv\Scripts\activate
-python odoo-bin -c C:\Odoo\odoo.conf -d YOUR_DATABASE -u odoo_ai_agent --stop-after-init
-```
-
-**4. Start Odoo again**, then refresh the browser with **Ctrl + Shift + R**:
-
-```bat
-python odoo-bin -c C:\Odoo\odoo.conf
-```
+**3.** Refresh the browser with **Ctrl + Shift + R**.
 
 > 💡 Instead of step 3, you can start Odoo normally and click **Apps** → search **AI Agent** → **⋮** → **Upgrade**.
 
