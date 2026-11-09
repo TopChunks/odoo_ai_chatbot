@@ -174,6 +174,16 @@ class AiAgentProvider(models.Model):
                     _("%(provider)s did not answer within %(seconds)s seconds. Try again, or choose a "
                       "faster model.", provider=self.name, seconds=timeout)
                 ) from err
+            except requests.ConnectionError as err:
+                # A dropped connection (network blip, connection reset): the same short retries as a busy provider.
+                delay = RETRY_DELAYS[attempt] if attempt < len(RETRY_DELAYS) else None
+                if delay and (deadline is None or time.monotonic() + delay + 5 < deadline):
+                    _logger.info("AI Agent: %s %s -> %s, retrying", self.code, path.split("?")[0], type(err).__name__)
+                    time.sleep(delay)
+                    continue
+                raise ProviderError(
+                    _("Odoo could not reach %(provider)s (%(error)s).", provider=self.name, error=type(err).__name__)
+                ) from err
             except requests.RequestException as err:
                 raise ProviderError(
                     _("Odoo could not reach %(provider)s (%(error)s).", provider=self.name, error=type(err).__name__)

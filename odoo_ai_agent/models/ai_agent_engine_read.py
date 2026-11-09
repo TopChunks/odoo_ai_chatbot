@@ -239,11 +239,21 @@ class AiAgentEngineRead(models.AbstractModel):
         return columns
 
     @api.model
-    def _with_x2many_names(self, columns, rows, shown=8):
-        """Replace lists of record IDs (assignees, tags, groups, lines...) by the names the user may read."""
+    def _with_x2many_names(self, columns, rows, state, shown=8):
+        """Replace lists of record IDs (assignees, tags, groups, lines...) by the names the user may read. Records
+        of an app the user cannot open (vendor prices without Purchase) are only counted, as a search would refuse
+        them."""
         for column in columns:
             relation = column.pop("relation", None)
             if not relation or relation not in self.env:
+                continue
+            if self._app_blocked(relation, state):
+                for row in rows:
+                    value = row.get(column["name"])
+                    if isinstance(value, list):
+                        count = len(value)
+                        row[column["name"]] = (_("1 record") if count == 1 else _("%s records", count)) if count else False
+                column["type"] = "char"
                 continue
             ids = {i for row in rows for i in (row.get(column["name"]) or [])[:shown] if isinstance(i, int)}
             try:
@@ -349,8 +359,8 @@ class AiAgentEngineRead(models.AbstractModel):
         for row in rows:
             names.extend(key for key in row if key not in names)
         columns = self._columns(model, names) if rows else []
-        linked = self._linked_ids(model, rows)
-        rows = self._with_x2many_names(columns, [dict(row) for row in rows])
+        linked = self._linked_ids(model, rows, state)
+        rows = self._with_x2many_names(columns, [dict(row) for row in rows], state)
         rows = self._with_document_names(columns, rows)
         rows = self._with_titles(model, rows)
         currency_field = next((c["currency_field"] for c in columns if c.get("currency_field")), None)
@@ -391,7 +401,7 @@ class AiAgentEngineRead(models.AbstractModel):
         )
 
     @api.model
-    def _linked_ids(self, model, rows):
+    def _linked_ids(self, model, rows, state):
         """The IDs of the records these rows link to (a line's product, a product's vendors), so the AI can look
         them up next, e.g. order > lines > products > vendors. IDs only: names and amounts stay in Odoo."""
         fields_map = self.env[model]._fields if model in self.env else {}
@@ -408,7 +418,9 @@ class AiAgentEngineRead(models.AbstractModel):
                 ids.extend(i for i in value or [] if isinstance(i, int) and i not in ids)
             if ids:
                 # Lists are shown to the user by name (vendors, tags...), even of models the AI may not search.
-                seen = "" if field.type == "many2one" else " (the user sees their names in the table)"
+                seen = "" if field.type == "many2one" else (
+                    " (no access: the user only sees how many)" if self._app_blocked(field.comodel_name, state)
+                    else " (the user sees their names in the table)")
                 parts.append(f"{name} -> {field.comodel_name} {ids[:30]}{seen}")
         return (f" Linked record IDs, for your next lookups only (never write them in the answer): {'; '.join(parts[:8])}."
                 if parts else "")
@@ -601,8 +613,8 @@ class AiAgentEngineRead(models.AbstractModel):
         data = structured.get("record") or {}
         label = self._model_label(model)
         columns = self._columns(model, [k for k in data if k not in ("id", "display_name")])
-        linked = self._linked_ids(model, [data])
-        data = self._with_x2many_names(columns, [dict(data)])[0]
+        linked = self._linked_ids(model, [data], state)
+        data = self._with_x2many_names(columns, [dict(data)], state)[0]
         ref = self._ai_add_result(state, {
             "type": "record",
             "id": uuid.uuid4().hex,

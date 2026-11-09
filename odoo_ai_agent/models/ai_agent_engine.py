@@ -32,14 +32,14 @@ from odoo.addons.mcp_server.controllers import utils as mcp_utils
 from .ai_agent_provider import ProviderError
 
 from .ai_agent_engine_constants import (
-    ACCESS_RIGHTS_SCHEMA, APP_GATE_DIRECTORY, APP_GATE_FREE_KINDS, BARE_URL, BUSINESS_FLOW_SCHEMA, CALCULATE_SCHEMA,
-    CAPPED, CARD_CLAIM, CHART_SCHEMA, CONVERSATION_STATS_SCHEMA, CORRECTION, DATA_TOOLS, DATA_USED, DATA_USED_NUDGE,
-    ERROR_HELP_EXCEPTIONS, ERROR_SOURCE_PLAIN, ERROR_SOURCE_TECHNICAL, FILTERS_ARGUMENT, FINAL_ANSWER_NUDGE,
-    FINAL_STEP_NOTE, FIND_CHANGES_SCHEMA, FLOW_SOURCE_PLAIN, FLOW_SOURCE_TECHNICAL, GET_FILTERS_SCHEMA,
-    HANDBACK_FILTERS, HISTORY_MESSAGES, HISTORY_RECORD_CAP, HISTORY_SCHEMA, MISTAKE, MODEL_LIST_CAP, NO_CHART,
-    NOT_ENABLED_CLAIM, NOT_ENABLED_NUDGE, PERIOD_ARGUMENT, PRESENT_SCHEMA, PROGRESS_LABELS, RAW_TAG, REFERS_EARLIER, REFERS_SHOWN, REFERS_SHOWN_NUDGE,
-    REFUSAL_REASON, SCHEMA_TOOLS, SCREEN_ARGUMENT, SETTINGS_SCHEMA, SHARED_ONLY_TOOLS, SHOW_APP_SCHEMA, SHOWN_ABOVE,
-    TABLE_ROW_CAP, TIME_MARGIN, WRITE_TOOLS, normalize_schema,
+    ACCESS_RIGHTS_SCHEMA, ANSWER_RULES, APP_GATE_DIRECTORY, APP_GATE_FREE_KINDS, ASKS_FOR_IDS, BARE_URL,
+    BUSINESS_FLOW_SCHEMA, CALCULATE_SCHEMA, CARD_CLAIM, CHART_SCHEMA, CONVERSATION_STATS_SCHEMA, DATA_TOOLS, DATA_USED,
+    DATA_USED_NUDGE, ERROR_HELP_EXCEPTIONS, ERROR_SOURCE_PLAIN, ERROR_SOURCE_TECHNICAL, FILTERS_ARGUMENT,
+    FINAL_ANSWER_NUDGE, FINAL_STEP_NOTE, FIND_CHANGES_SCHEMA, FLOW_SOURCE_PLAIN, FLOW_SOURCE_TECHNICAL,
+    GET_FILTERS_SCHEMA, HISTORY_MESSAGES, HISTORY_RECORD_CAP, HISTORY_SCHEMA, MODEL_LIST_CAP, NO_CHART,
+    NOT_ENABLED_CLAIM, NOT_ENABLED_NUDGE, PERIOD_ARGUMENT, PRESENT_SCHEMA, PROGRESS_LABELS, RAW_TAG, RECORD_ID_MENTION,
+    REFERS_EARLIER, REFERS_SHOWN, REFERS_SHOWN_NUDGE, REFUSAL_REASON, SCHEMA_TOOLS, SCREEN_ARGUMENT, SETTINGS_SCHEMA,
+    SHARED_ONLY_TOOLS, SHOW_APP_SCHEMA, TABLE_ROW_CAP, TIME_MARGIN, WRITE_TOOLS, normalize_schema,
 )
 
 try:
@@ -602,6 +602,7 @@ STYLE
 - Reply in the language of the user's last message, judged by its words, not by names or quoted text in it ("Find साइकिल भंडार" is English). AI Agent conversations of other users are private: if asked for someone else's AI chats, say in one sentence that they are private and only visible to that user; do not search for them. Match the length to the request: one to three sentences for simple lookups and actions; for "explain", "analyse", "compare", "summarise", "rate" or "why" questions give a complete, structured answer (short headings or bullet points, the key figures, a conclusion). Markdown is fine.
 - Never write tables of data in your text: show them with present. In your text, explain and highlight what matters.
 - "Which … the most / top / lowest …" questions: sort the result by that figure (order desc, or asc for lowest). Odoo names the top row in a note under the table, so say the answer is highlighted below; never ask the user to find it in the table.
+- When you limit the records in a way the user did not say (only leads, not opportunities; only confirmed orders), say so in a few words.
 - A correct search that finds nothing is the answer ("No deliveries are ready to ship today."): say it plainly; never doubt it or say you cannot tell whether it is accurate.
 - Never mention tools, MCP, JSON, domains, result names like r1, or record and user IDs unless the user asks."""
 
@@ -911,6 +912,30 @@ STYLE
         return Markup(html_sanitize(html))
 
     @api.model
+    def _clean_answer(self, text, state, config):
+        """The answer check: the paid yes/no verdict, then ANSWER_RULES in order (see their comment)."""
+        text = self._paid_verdict(state.get("question") or "", text or "")
+        blocks = state.get("blocks") or []
+        tables = [b for b in blocks if b.get("type") == "table" and not b.get("collapsed")]
+        applies = {
+            "always": True,
+            "data": bool(blocks),
+            "complete": bool(tables) and all((b.get("total") or 0) <= len(b.get("rows") or []) and not b.get("has_more")
+                                             for b in tables),
+            "private": bool(blocks) and not (config or {}).get("share_data"),
+        }
+        asks_ids = ASKS_FOR_IDS.search(state.get("question") or "")
+        for name, pattern, replacement, when in ANSWER_RULES:
+            if not applies[when] or (pattern is RECORD_ID_MENTION and asks_ids):
+                continue
+            if when == "private":
+                # A refusal with its reason ("I can't see his opportunities: your access rights...") is an answer.
+                text = pattern.sub(lambda m: m.group(0) if REFUSAL_REASON.search(m.group(0)) else "", text)
+            else:
+                text = pattern.sub(replacement, text)
+        return text.strip()
+
+    @api.model
     def _post_answer(self, channel, text, error, state, config):
         if state.get("not_found"):
             # Lines fetched in the same step as their parent, before it turned out to be not found: drop them.
@@ -988,22 +1013,7 @@ STYLE
         # Info notes (best salesperson, archived record) go under the tables they are about.
         notes = [b for b in state["blocks"] if b.get("type") == "notice" and b.get("level") == "info"]
         state["blocks"] = [b for b in state["blocks"] if b not in notes] + notes
-        # Tables and charts are shown under the text, whatever the AI calls them.
-        text = SHOWN_ABOVE.sub(r"\1\2below", text or "")
-        if state.get("blocks"):
-            text = MISTAKE.sub("", text).strip()  # "I ran the chart twice by mistake": Odoo already shows it once
-            text = CORRECTION.sub(lambda m: m.group(1).upper(), text)  # no earlier note to correct
-            tables = [b for b in state["blocks"] if b.get("type") == "table" and not b.get("collapsed")]
-            if tables and all((b.get("total") or 0) <= len(b.get("rows") or []) and not b.get("has_more")
-                              for b in tables):
-                text = CAPPED.sub("", text).strip()  # every table shown is complete: no "list is capped" warning
-        text = self._paid_verdict(state.get("question") or "", text)
-        if not (config or {}).get("share_data") and state.get("blocks"):
-            for pattern in HANDBACK_FILTERS:
-                # A refusal with its reason ("I can't see his opportunities: your access rights...") is an answer,
-                # not a hand-back: keep it.
-                text = pattern.sub(lambda m: m.group(0) if REFUSAL_REASON.search(m.group(0)) else "", text)
-            text = text.strip()
+        text = self._clean_answer(text, state, config)
         body = self._markdown(text)
         if error and not body:
             body = Markup("<p>%s</p>") % error

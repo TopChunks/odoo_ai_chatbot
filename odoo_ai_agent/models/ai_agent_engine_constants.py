@@ -306,7 +306,9 @@ YOURSELF = re.compile(r"\s*[^.!?\n]*\b(?:compare|check|read|look at|sort|find|wo
 HANDBACK = re.compile(r"\s*[^.!?\n]*(?:\bI can(?:'|no)t name\b|\bthere for you to (?:read|check|see)\b|"
                       r"\b(?:check|look at|see)\b[^.!?\n]*\b(?:column|dates)\b[^.!?\n]*"
                       r"\bto (?:find|see|spot)\b|\b(?:calculated|computed)\b[^.!?\n]*\b(?:isn't|is not|wasn't|not) "
-                      r"shown\b)[^.!?\n]*[.!?]", re.IGNORECASE)
+                      r"shown\b|\bso (?:that )?you can (?:see|check|tell|confirm) (?:whether|if)\b|"
+                      r"\bif\b[^.!?\n]*\b(?:doesn't|does not|don't|do not) (?:appear|show up)\b)[^.!?\n]*[.!?]",
+                      re.IGNORECASE)
 COMPARE_INTENT = re.compile(r"\b(?:compare|comparison|versus|vs\.?|difference between)\b", re.IGNORECASE)
 CHART_INTENT = re.compile(r"\b(?:chart|graph|plot|visuali[sz]ation|visuali[sz]e)\b", re.IGNORECASE)
 HIGHLIGHT_CLAIM = re.compile(r"\bhighlight", re.IGNORECASE)
@@ -351,7 +353,8 @@ RAW_TAG = re.compile(r"<(?=/?[A-Za-z!])(?!/?(?:b|i|u|s|em|strong|br|code|p|ul|ol
 # "There is nothing to chart": no chart belongs to this answer.
 NO_CHART = re.compile(r"\bnothing to (?:chart|plot|draw)\b", re.IGNORECASE)
 # "I accidentally displayed a first chart...": about the AI's own tool calls, not the user's data.
-MISTAKE = re.compile(r"\s*[^.!?\n]*\b(?:accidentally|by mistake|mistakenly)\b[^.!?\n]*[.!?]", re.IGNORECASE)
+MISTAKE = re.compile(r"\s*[^.!?\n]*(?:\b(?:accidentally|by mistake|mistakenly)\b|\b(?:presented|showed|displayed|"
+                     r"appeared|drew|ran|tables?|charts?)\b[^.!?\n]*\btwice\b)[^.!?\n]*[.!?]", re.IGNORECASE)
 # "I should correct my earlier note: the filter..." when there was no earlier note: only the opening words go.
 CORRECTION = re.compile(r"\b(?:I )?(?:should|must|need to|want to) correct my (?:earlier|previous) \w+[:,.]\s*(\w)",
                         re.IGNORECASE)
@@ -395,11 +398,27 @@ IN_TABLE = re.compile(r"\s*[^.!?\n]*\b(?:figures|values|amounts|numbers|prices?|
 CANT_SEE = re.compile(r"\s*[^.!?\n]*\bI (?:can't|cannot|can not|don't|do not) (?:see|read|view|state|tell|give|quote|"
                       r"say)\b[^.!?\n]*\b(?:figures?|values?|amounts?|numbers?|prices?|totals?)\b[^.!?\n]*[.!?]",
                       re.IGNORECASE)
-# Sentences that hand the reading back to the user, removed when data sharing is off (in this order).
-HANDBACK_FILTERS = (CANT_SEE, YOURSELF, HANDBACK, IN_TABLE)
 # The reason of a refusal: such a sentence answers the question and is never removed as a hand-back.
 REFUSAL_REASON = re.compile(r"\b(?:access|rights?|permission|allowed|private|restricted|confidential|not enabled)\b",
                             re.IGNORECASE)
+# "(product ID 39)", "(reference 96)": internal record numbers the user never sees in Odoo.
+RECORD_ID_MENTION = re.compile(r"\s*\((?:[a-z]+ ){0,2}(?:ID|reference|ref\.?)\s*:?\s*#?\d+\)", re.IGNORECASE)
+ASKS_FOR_IDS = re.compile(r"\bids?\b", re.IGNORECASE)
+# The answer check, applied in this order to every answer (AiAgentEngine._clean_answer). Each rule: name, pattern,
+# replacement, and when it applies: "always", "data" (the answer shows Odoo results), "complete" (every table shown
+# is complete) or "private" (data sharing off: the AI never saw the values, so "check the table yourself" is a
+# hand-back; a sentence giving an access reason is kept). Its examples are in tests/test_answer_check.py.
+ANSWER_RULES = (
+    ("tables are shown below", SHOWN_ABOVE, r"\1\2below", "always"),
+    ("no record IDs", RECORD_ID_MENTION, "", "always"),
+    ("no talk about its own steps", MISTAKE, "", "data"),
+    ("no correction of a note that never was", CORRECTION, lambda m: m.group(1).upper(), "data"),
+    ("no 'list is capped' for a complete list", CAPPED, "", "complete"),
+    ("no 'I cannot see the values'", CANT_SEE, "", "private"),
+    ("no 'check it yourself'", YOURSELF, "", "private"),
+    ("no hand-back to the user", HANDBACK, "", "private"),
+    ("no 'the values are in the table'", IN_TABLE, "", "private"),
+)
 FINAL_STEP_NOTE = (
     "\n\nNO TOOL STEPS LEFT: write the final answer now from the results you already have (Odoo shows them to the user). "
     "If something could not be found, say so in one sentence."
