@@ -118,7 +118,8 @@ class AiAgentEnginePresent(models.AbstractModel):
             return False
         results = state.get("results") or {}
         candidates = [(ref, result) for ref, result in results.items()
-                      if result.get("type") == "table" and result.get("grouped") and result.get("spec")]
+                      if result.get("type") == "table" and result.get("grouped") and result.get("spec")
+                      and result.get("rows")]  # no data: no chart
         if not candidates:
             return False
         item = {"result": candidates[-1][0], "view": "bar"}
@@ -454,6 +455,8 @@ class AiAgentEnginePresent(models.AbstractModel):
         spec = source.get("spec")
         if source["type"] != "table" or not spec:
             raise UserError(_("Charts need a grouped result from aggregate_records (or use show_chart)."))
+        if not source.get("rows"):
+            raise UserError(_("No records match, so there is nothing to chart: say so, without a chart."))
         self._check_model_read(spec["model"])
         groupby = spec["groupby"][:2]
         aggregates = spec["aggregates"] or ["__count"]
