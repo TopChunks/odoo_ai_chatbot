@@ -510,6 +510,11 @@ class AiAgentEnginePresent(models.AbstractModel):
         if not groupby:
             raise UserError(_("groupby needs at least one field."))
         measure = (arguments.get("measure") or "__count").strip()
+        refused = self._cost_refused(model, [*groupby, measure, *(t[0] for t in self._domain(arguments)
+                                                                 if isinstance(t, (list, tuple)) and t)])
+        if refused:
+            self._add_notice(state, refused)
+            raise UserError(refused)
         chart_type = arguments.get("chart_type") or "bar"
         if chart_type not in ("bar", "line", "pie", "pivot"):
             chart_type = "bar"

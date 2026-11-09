@@ -33,11 +33,11 @@ from .ai_agent_provider import ProviderError
 
 from .ai_agent_engine_constants import (
     ACCESS_RIGHTS_SCHEMA, APP_GATE_DIRECTORY, APP_GATE_FREE_KINDS, BARE_URL, BUSINESS_FLOW_SCHEMA, CALCULATE_SCHEMA,
-    CAPPED, CARD_CLAIM, CHART_SCHEMA, CONVERSATION_STATS_SCHEMA, DATA_TOOLS, DATA_USED, DATA_USED_NUDGE,
+    CAPPED, CARD_CLAIM, CHART_SCHEMA, CONVERSATION_STATS_SCHEMA, CORRECTION, DATA_TOOLS, DATA_USED, DATA_USED_NUDGE,
     ERROR_HELP_EXCEPTIONS, ERROR_SOURCE_PLAIN, ERROR_SOURCE_TECHNICAL, FILTERS_ARGUMENT, FINAL_ANSWER_NUDGE,
     FINAL_STEP_NOTE, FIND_CHANGES_SCHEMA, FLOW_SOURCE_PLAIN, FLOW_SOURCE_TECHNICAL, GET_FILTERS_SCHEMA,
     HANDBACK_FILTERS, HISTORY_MESSAGES, HISTORY_RECORD_CAP, HISTORY_SCHEMA, MISTAKE, MODEL_LIST_CAP, NO_CHART,
-    PERIOD_ARGUMENT, PRESENT_SCHEMA, PROGRESS_LABELS, RAW_TAG, REFERS_EARLIER, REFERS_SHOWN, REFERS_SHOWN_NUDGE,
+    NOT_ENABLED_CLAIM, NOT_ENABLED_NUDGE, PERIOD_ARGUMENT, PRESENT_SCHEMA, PROGRESS_LABELS, RAW_TAG, REFERS_EARLIER, REFERS_SHOWN, REFERS_SHOWN_NUDGE,
     REFUSAL_REASON, SCHEMA_TOOLS, SCREEN_ARGUMENT, SETTINGS_SCHEMA, SHARED_ONLY_TOOLS, SHOW_APP_SCHEMA, SHOWN_ABOVE,
     TABLE_ROW_CAP, TIME_MARGIN, WRITE_TOOLS, normalize_schema,
 )
@@ -601,6 +601,7 @@ STYLE
 - Reply in the language of the user's last message, judged by its words, not by names or quoted text in it ("Find साइकिल भंडार" is English). AI Agent conversations of other users are private: if asked for someone else's AI chats, say in one sentence that they are private and only visible to that user; do not search for them. Match the length to the request: one to three sentences for simple lookups and actions; for "explain", "analyse", "compare", "summarise", "rate" or "why" questions give a complete, structured answer (short headings or bullet points, the key figures, a conclusion). Markdown is fine.
 - Never write tables of data in your text: show them with present. In your text, explain and highlight what matters.
 - "Which … the most / top / lowest …" questions: sort the result by that figure (order desc, or asc for lowest). Odoo names the top row in a note under the table, so say the answer is highlighted below; never ask the user to find it in the table.
+- A correct search that finds nothing is the answer ("No deliveries are ready to ship today."): say it plainly; never doubt it or say you cannot tell whether it is accurate.
 - Never mention tools, MCP, JSON, domains, result names like r1, or record and user IDs unless the user asks."""
 
     @api.model
@@ -728,6 +729,12 @@ STYLE
                 if DATA_USED.search(text or "") and not last_step and not state.get("data_used_retry"):
                     state["data_used_retry"] = True
                     messages.append({"role": "user", "content": DATA_USED_NUDGE})
+                    continue
+                if (NOT_ENABLED_CLAIM.search(text or "") and not last_step and not state.get("enabled_retry")
+                        and not any(" in MCP" in n for n in state.get("notices", []))):
+                    # It decided a model is not enabled from the list alone: Odoo's check names exactly what to enable.
+                    state["enabled_retry"] = True
+                    messages.append({"role": "user", "content": NOT_ENABLED_NUDGE})
                     continue
                 break
             for call in reply["tool_calls"]:
@@ -984,6 +991,7 @@ STYLE
         text = SHOWN_ABOVE.sub(r"\1\2below", text or "")
         if state.get("blocks"):
             text = MISTAKE.sub("", text).strip()  # "I ran the chart twice by mistake": Odoo already shows it once
+            text = CORRECTION.sub(lambda m: m.group(1).upper(), text)  # no earlier note to correct
             tables = [b for b in state["blocks"] if b.get("type") == "table" and not b.get("collapsed")]
             if tables and all((b.get("total") or 0) <= len(b.get("rows") or []) and not b.get("has_more")
                               for b in tables):

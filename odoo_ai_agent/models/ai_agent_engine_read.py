@@ -8,11 +8,13 @@ import re
 import uuid
 
 from odoo import _, api, models
+from odoo.exceptions import UserError
 
 from odoo.addons.mcp_server.controllers import utils as mcp_utils
 
 from .ai_agent_engine_constants import (
-    ARCHIVED_NOTE_MODELS, CELL_TEXT_CAP, NAME_HINT_MODELS, SCHEMA_TEXT_CAP, SHARED_TEXT_CAP, TABLE_ROW_CAP,
+    ARCHIVED_NOTE_MODELS, CELL_TEXT_CAP, COST_FIELDS, COST_HIDDEN, NAME_HINT_MODELS, SCHEMA_TEXT_CAP, SHARED_TEXT_CAP,
+    TABLE_ROW_CAP,
 )
 
 _logger = logging.getLogger(__name__)
@@ -47,23 +49,24 @@ class AiAgentEngineRead(models.AbstractModel):
                 state.setdefault("filter_labels", {})[signature] = labels
             for key in ("screen", "filters", "period"):
                 arguments.pop(key, None)
+        left_out = self._without_costs(tool, arguments, state)
         sort_after = []
         dropped = self._drop_unsortable(arguments, sort_after)
-        left_out = ""
         if name == "aggregate_records" and not arguments.get("groupby"):
             arguments.pop("groupby", None)
             structured = self._aggregate_totals(arguments)
             text = json.dumps(structured["groups"], ensure_ascii=False, default=str)
         else:
-            result, left_out = self._call_mcp_readable(tool, arguments)
+            result, private = self._call_mcp_readable(tool, arguments)
             if name == "search_records" and not (result.get("structuredContent") or {}).get("records"):
                 singular = self._singular_retry(arguments)
                 if singular:
                     # "bikes" finds nothing, the names say "Bike": search the singular word instead.
-                    retried, left_out = self._call_mcp_readable(tool, singular[0])
+                    retried, private = self._call_mcp_readable(tool, singular[0])
                     if (retried.get("structuredContent") or {}).get("records"):
                         arguments, result = singular[0], retried
-                        left_out += f" Nothing matched '{singular[1]}', so '{singular[2]}' was searched instead."
+                        private += f" Nothing matched '{singular[1]}', so '{singular[2]}' was searched instead."
+            left_out += private
             text = self._result_text(result)
             if tool["kind"] == "schema":
                 outline = ""
@@ -73,6 +76,13 @@ class AiAgentEngineRead(models.AbstractModel):
                     outline = self._screen_outline(arguments["model"])
                 return text[:SCHEMA_TEXT_CAP - len(outline)] + outline
             structured = result.get("structuredContent") or {}
+            hidden = COST_FIELDS.get(arguments.get("model"), ())
+            if hidden and self._cost_refused(arguments["model"], hidden):
+                # Costs Odoo returns by default (a product's Cost): out of the result, and of the shared text.
+                for row in [*(structured.get("records") or []), structured.get("record") or {}]:
+                    for key in hidden:
+                        row.pop(key, None)
+                text = json.dumps(structured, ensure_ascii=False, default=str)
         if name == "search_records":
             summary = self._block_table(arguments, structured, state, signature)
             if sort_after and state["blocks"] and state["blocks"][-1].get("type") == "table":
@@ -89,6 +99,33 @@ class AiAgentEngineRead(models.AbstractModel):
         if config["share_data"]:
             summary += "\n\nRESULT (also shown to the user):\n" + text[:SHARED_TEXT_CAP]
         return summary
+
+    @api.model
+    def _without_costs(self, tool, arguments, state):
+        """Costs the user may not see: asked-for cost columns are left out (with a notice); filtering, grouping,
+        sorting or totalling on them is refused, since the result would reveal them."""
+        model = arguments.get("model")
+        if tool["kind"] == "schema" or not isinstance(model, str) or model not in self.env:
+            return ""
+
+        def listed(key):
+            value = arguments.get(key)
+            return [value] if isinstance(value, str) else list(value or [])
+
+        used = listed("groupby") + listed("aggregates")
+        used += [t.split()[0] for t in str(arguments.get("order") or "").split(",") if t.strip()]
+        used += [t[0] for t in self._domain(arguments) if isinstance(t, (list, tuple)) and t and isinstance(t[0], str)]
+        refused = self._cost_refused(model, used)
+        if refused:
+            self._add_notice(state, refused)
+            raise UserError(refused)
+        asked = listed("fields")
+        kept = [f for f in asked if not self._cost_refused(model, [f])]
+        if len(kept) == len(asked):
+            return ""
+        arguments["fields"] = kept or ["display_name"]
+        self._add_notice(state, COST_HIDDEN)
+        return " Cost columns were left out: this user may not see costs (the user was told)."
 
     @api.model
     def _aggregate_totals(self, arguments):
@@ -312,6 +349,7 @@ class AiAgentEngineRead(models.AbstractModel):
         for row in rows:
             names.extend(key for key in row if key not in names)
         columns = self._columns(model, names) if rows else []
+        linked = self._linked_ids(model, rows)
         rows = self._with_x2many_names(columns, [dict(row) for row in rows])
         rows = self._with_document_names(columns, rows)
         rows = self._with_titles(model, rows)
@@ -348,9 +386,32 @@ class AiAgentEngineRead(models.AbstractModel):
                  else self._empty_columns(columns, rows))
         return (
             f"[{ref}] {total} {label} record(s) that this user can access match; {len(rows)} rows with the columns "
-            f"{self._column_text(columns)}. Record IDs: {ids[:60]}.{more}{facts}{self._exact_name(model, arguments, ids)}"
-            f"{archived}"
+            f"{self._column_text(columns)}. Record IDs: {ids[:60]}.{linked}{more}{facts}"
+            f"{self._exact_name(model, arguments, ids)}{archived}"
         )
+
+    @api.model
+    def _linked_ids(self, model, rows):
+        """The IDs of the records these rows link to (a line's product, a product's vendors), so the AI can look
+        them up next, e.g. order > lines > products > vendors. IDs only: names and amounts stay in Odoo."""
+        fields_map = self.env[model]._fields if model in self.env else {}
+        parts = []
+        for name in dict.fromkeys(key for row in rows for key in row):
+            field = fields_map.get(name)
+            if field is None or field.type not in ("many2one", "one2many", "many2many"):
+                continue
+            ids = []
+            for row in rows:
+                value = row.get(name)
+                if field.type == "many2one":
+                    value = value[:1] if isinstance(value, (list, tuple)) else []
+                ids.extend(i for i in value or [] if isinstance(i, int) and i not in ids)
+            if ids:
+                # Lists are shown to the user by name (vendors, tags...), even of models the AI may not search.
+                seen = "" if field.type == "many2one" else " (the user sees their names in the table)"
+                parts.append(f"{name} -> {field.comodel_name} {ids[:30]}{seen}")
+        return (f" Linked record IDs, for your next lookups only (never write them in the answer): {'; '.join(parts[:8])}."
+                if parts else "")
 
     @staticmethod
     def _empty_columns(columns, rows):
@@ -540,6 +601,7 @@ class AiAgentEngineRead(models.AbstractModel):
         data = structured.get("record") or {}
         label = self._model_label(model)
         columns = self._columns(model, [k for k in data if k not in ("id", "display_name")])
+        linked = self._linked_ids(model, [data])
         data = self._with_x2many_names(columns, [dict(data)])[0]
         ref = self._ai_add_result(state, {
             "type": "record",
@@ -552,7 +614,7 @@ class AiAgentEngineRead(models.AbstractModel):
         }, signature)
         empty = "" if state.get("share_data") else self._empty_columns(columns, [data])
         return (f"[{ref}] The {label} record (ID {data.get('id')}) as a card with the fields "
-                f"{', '.join(c['label'] for c in columns)}.{empty}")
+                f"{', '.join(c['label'] for c in columns)}.{linked}{empty}")
 
     @api.model
     def _block_groups(self, arguments, structured, state, signature=None):

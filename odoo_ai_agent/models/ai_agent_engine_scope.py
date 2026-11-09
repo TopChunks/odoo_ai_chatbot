@@ -570,6 +570,10 @@ class AiAgentEngineScope(models.AbstractModel):
         Model = self._check_model_read(arguments.get("model"))
         model = Model._name
         field_name = arguments.get("field")
+        refused = self._cost_refused(model, [field_name or ""])
+        if refused:
+            self._add_notice(state, refused)
+            raise UserError(refused)  # "who changed the cost" shows the old and new costs
         field = Model._fields.get(field_name or "")
         if not field:
             similar = difflib.get_close_matches(field_name or "", list(Model._fields), n=5, cutoff=0.5)

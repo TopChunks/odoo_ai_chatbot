@@ -54,6 +54,7 @@ DEFAULT_MODELS = {
     "mrp.workcenter": {},
     "link.tracker": {},
     "link.tracker.click": {},
+    "link.tracker.code": {},
     "utm.campaign": {},
     "utm.source": {},
     "utm.medium": {},

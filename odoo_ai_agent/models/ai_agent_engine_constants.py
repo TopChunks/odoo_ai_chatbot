@@ -314,6 +314,9 @@ HIGHLIGHT_CLAIM = re.compile(r"\bhighlight", re.IGNORECASE)
 SUPERLATIVE = re.compile(r"(?<!\bat )\b(?:most(?! recent)(?! recently)|top(?! of)|best|highest|largest|biggest|"
                          r"maximum|lowest|least|cheapest|fewest|smallest|minimum)\b", re.IGNORECASE)
 LOWEST = re.compile(r"\b(?:lowest|least|cheapest|fewest|smallest|minimum)\b", re.IGNORECASE)
+# "below their reordering minimum", "over the maximum": a limit the records are compared with, not a superlative.
+LIMIT_WORDS = re.compile(r"\b(?:below|under|above|over|exceed\w*|reach\w*)\s+(?:\w+\s+){0,3}?(?:minimum|maximum)\b",
+                         re.IGNORECASE)
 # "Is INV/2026/00046 fully paid?" and an answer that starts with Yes or No.
 PAID_QUESTION = re.compile(r"^\s*(?:is|are|has|have|was|were)\b.*\bpaid\b", re.IGNORECASE)
 YES_NO = re.compile(r"\s*\**\s*(yes|no)\b", re.IGNORECASE)
@@ -349,6 +352,9 @@ RAW_TAG = re.compile(r"<(?=/?[A-Za-z!])(?!/?(?:b|i|u|s|em|strong|br|code|p|ul|ol
 NO_CHART = re.compile(r"\bnothing to (?:chart|plot|draw)\b", re.IGNORECASE)
 # "I accidentally displayed a first chart...": about the AI's own tool calls, not the user's data.
 MISTAKE = re.compile(r"\s*[^.!?\n]*\b(?:accidentally|by mistake|mistakenly)\b[^.!?\n]*[.!?]", re.IGNORECASE)
+# "I should correct my earlier note: the filter..." when there was no earlier note: only the opening words go.
+CORRECTION = re.compile(r"\b(?:I )?(?:should|must|need to|want to) correct my (?:earlier|previous) \w+[:,.]\s*(\w)",
+                        re.IGNORECASE)
 # "The list is capped at 100 rows, so if you have more...": removed when every table shown is complete.
 CAPPED = re.compile(r"\s*[^.!?\n]*\b(?:capped|limited|truncated|cut off)\s+(?:at|to)\s+(?:the\s+first\s+)?\d+[^.!?\n]*[.!?]",
                     re.IGNORECASE)
@@ -361,6 +367,27 @@ DATA_USED = re.compile(r"\b(?:under|in|see)\s+(?:the\s+)?[\"'\u201c]?data used\b
 DATA_USED_NUDGE = ("(The 'data used' section is folded and only lets the user check the answer; it is not part of it. "
                    "Present every result your answer talks about with the present tool (one item per result), then "
                    "answer again and refer to them as shown below.)")
+# Product costs, stock values and margins, per model: only for users with one of COST_GROUPS (buying, accounting or
+# inventory administration); others get the rest of the data, never these values or filters on them.
+COST_FIELDS = {
+    "product.product": ("standard_price", "avg_cost", "total_value"),
+    "product.template": ("standard_price",),
+    "stock.quant": ("value",),
+    "stock.move": ("value", "standard_price", "remaining_value", "value_manual"),
+    "stock.lot": ("avg_cost", "total_value", "standard_price"),
+    "sale.order": ("margin", "margin_percent"),
+    "sale.order.line": ("purchase_price", "margin", "margin_percent"),
+}
+COST_GROUPS = ("base.group_system", "purchase.group_purchase_user", "account.group_account_invoice",
+               "account.group_account_readonly", "stock.group_stock_manager")
+COST_HIDDEN = ("Product costs, stock values and margins are shown only to users with Purchase, Accounting or Inventory "
+               "Administrator access. An administrator can give access in Settings > Users.")
+# "Click data isn't enabled for this assistant (Enabled MCP models)" said without any tool having been refused.
+NOT_ENABLED_CLAIM = re.compile(r"\bEnabled MCP models\b|\b(?:not|n't) (?:been )?enabled (?:in MCP|for (?:this assistant|"
+                               r"the AI|AI Agent|me|this chat))\b", re.IGNORECASE)
+NOT_ENABLED_NUDGE = ("(No tool told you in this answer that something is not enabled. Call the matching tool now with "
+                     "that model's technical name: Odoo checks it and shows the user exactly what to enable. Then answer "
+                     "again.)")
 # "The rule's price figures are in that table.": says nothing the table under the answer does not already show.
 IN_TABLE = re.compile(r"\s*[^.!?\n]*\b(?:figures|values|amounts|numbers|prices?|details)\s+(?:are|is)\s+"
                       r"(?:shown\s+|listed\s+)?in\s+(?:that|this|the)\s+table\s*[.!?]", re.IGNORECASE)

@@ -16,7 +16,8 @@ from odoo.tools import ormcache
 from odoo.addons.mcp_server.controllers import utils as mcp_utils
 
 from .ai_agent_engine_constants import (
-    APP_GATE_NOT_PARENTS, COMPARE_INTENT, CONVERSATION_SCORE_TEXT, FIELD_ACCESS_ERROR, HIGHLIGHT_CLAIM, LOWEST,
+    APP_GATE_NOT_PARENTS, COMPARE_INTENT, CONVERSATION_SCORE_TEXT, COST_FIELDS, COST_GROUPS, COST_HIDDEN,
+    FIELD_ACCESS_ERROR, HIGHLIGHT_CLAIM, LIMIT_WORDS, LOWEST,
     OPERATION_CHECKBOXES, SCHEMA_TOOLS, SCREEN_OUTLINE_CAP, SETTING_SECRET, SETTING_STOPWORDS, SUPERLATIVE,
     TOOL_OPERATIONS, TRACE_NOTE_CAP,
 )
@@ -41,7 +42,7 @@ class AiAgentEngineChecks(models.AbstractModel):
                 block["subtitle"] = " · ".join(p for p in block["subtitle"].split(" · ") if p != CONVERSATION_SCORE_TEXT)
         if COMPARE_INTENT.search(question):
             self._add_difference_note(state, tables, charts)
-        match = SUPERLATIVE.search(question)
+        match = SUPERLATIVE.search(LIMIT_WORDS.sub("", question))  # "below their minimum" is a limit, not the lowest
         scored = next((b for b in tables if any(c["name"] == "score" for c in b["columns"])), None)
         if scored is not None and (not match or self._question_column(scored, question) in (None, "score")):
             # A salesperson comparison that shows the conversation score: name the best score.
@@ -153,6 +154,8 @@ class AiAgentEngineChecks(models.AbstractModel):
                                           (r["values"][key] if lowest else -r["values"][key])
                                           if isinstance(r["values"].get(key), (int, float)) else 0))
         value = (min if lowest else max)(r["values"][key] for r in rows)
+        if len(rows) > 1 and all(r["values"][key] == value for r in rows):
+            return False  # every row has the same value (all 0 clicks): nothing stands out
         tied = [self._row_name(block, r, lower=False) for r in rows if r["values"][key] == value]
         tied = [n for n in tied if n]
         if not tied:
@@ -384,6 +387,24 @@ class AiAgentEngineChecks(models.AbstractModel):
         names += [t[0] for t in arguments.get("domain") or [] if isinstance(t, (list, tuple)) and t and isinstance(t[0], str)]
         names += [t.split()[0] for t in str(arguments.get("order") or "").split(",") if t.strip()]
         return [str(n).split(".")[0].split(":")[0] for n in names]
+
+    @api.model
+    def _cost_refused(self, model, names):
+        """COST_HIDDEN when one of the field paths (product_id.standard_price, value:sum...) is a cost this user may
+        not see, else None."""
+        if any(self.env.ref(group, raise_if_not_found=False) and self.env.user.has_group(group)
+               for group in COST_GROUPS):
+            return None
+        for name in names:
+            current = model
+            for part in str(name).split(":")[0].split("."):
+                field = self.env[current]._fields.get(part) if current in self.env else None
+                if field is None:
+                    break
+                if part in COST_FIELDS.get(current, ()):
+                    return COST_HIDDEN
+                current = field.comodel_name
+        return None
 
     @api.model
     def _app_blocked(self, model, state, depth=0):

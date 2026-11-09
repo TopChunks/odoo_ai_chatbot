@@ -60,6 +60,13 @@ class AiAgentEngineWrite(models.AbstractModel):
             self._check_arguments(tool["raw_schema"], arguments)
             model = arguments.get("model")
             self._check_write_allowed(name, model)
+            refused = self._cost_refused(model, list(arguments.get("values") or {}))
+            if refused:
+                self._add_notice(state, refused)
+                raise UserError(refused)  # setting a cost the user may not see
+            if name == "call_model_method":
+                # MCP's own check, before a preview exists: reading (read, search...) is not a button to press.
+                self.env["mcp.mixin"]._validate_method_call(model, self.env[model], str(arguments.get("method") or ""))
             model_label = self._model_label(model)
             title, lines, records = self._preview(name, model, arguments)
         block = {
