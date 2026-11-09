@@ -307,7 +307,8 @@ HANDBACK = re.compile(r"\s*[^.!?\n]*(?:\bI can(?:'|no)t name\b|\bthere for you t
                       r"\b(?:check|look at|see)\b[^.!?\n]*\b(?:column|dates)\b[^.!?\n]*"
                       r"\bto (?:find|see|spot)\b|\b(?:calculated|computed)\b[^.!?\n]*\b(?:isn't|is not|wasn't|not) "
                       r"shown\b|\bso (?:that )?you can (?:see|check|tell|confirm) (?:whether|if)\b|"
-                      r"\bif\b[^.!?\n]*\b(?:doesn't|does not|don't|do not) (?:appear|show up)\b)[^.!?\n]*[.!?]",
+                      r"\bif\b[^.!?\n]*\b(?:doesn't|does not|don't|do not) (?:appear|show up)\b|"
+                      r"\b(?:can't|cannot|can not) tell\b[^.!?\n]{0,40}\bwhether\b)[^.!?\n]*[.!?]",
                       re.IGNORECASE)
 COMPARE_INTENT = re.compile(r"\b(?:compare|comparison|versus|vs\.?|difference between)\b", re.IGNORECASE)
 CHART_INTENT = re.compile(r"\b(?:chart|graph|plot|visuali[sz]ation|visuali[sz]e)\b", re.IGNORECASE)

@@ -327,7 +327,6 @@ class AiAgentEngineHistory(models.AbstractModel):
         else:
             rows.sort(key=lambda r: (r["values"]["score"] is False, not r["values"]["enough_data"],
                                      -(r["values"]["score"] or 0)))
-            best = rows[0]["values"] if rows and rows[0]["values"].get("enough_data") else None
         period = " · ".join(p for p in (start and _("from %s", start), end and _("to %s", end)) if p)
         ref = self._ai_add_result(state, {
             "type": "table", "id": uuid.uuid4().hex, "title": _("Conversation and follow-up by salesperson"),

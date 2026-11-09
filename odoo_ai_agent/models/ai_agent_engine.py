@@ -33,7 +33,8 @@ from .ai_agent_provider import ProviderError
 
 from .ai_agent_engine_constants import (
     ACCESS_RIGHTS_SCHEMA, ANSWER_RULES, APP_GATE_DIRECTORY, APP_GATE_FREE_KINDS, ASKS_FOR_IDS, BARE_URL,
-    BUSINESS_FLOW_SCHEMA, CALCULATE_SCHEMA, CARD_CLAIM, CHART_SCHEMA, CONVERSATION_STATS_SCHEMA, DATA_TOOLS, DATA_USED,
+    BUSINESS_FLOW_SCHEMA, CALCULATE_SCHEMA, CARD_CLAIM, CHART_SCHEMA, COMPARE_INTENT, CONVERSATION_STATS_SCHEMA,
+    DATA_TOOLS, DATA_USED,
     DATA_USED_NUDGE, ERROR_HELP_EXCEPTIONS, ERROR_SOURCE_PLAIN, ERROR_SOURCE_TECHNICAL, FILTERS_ARGUMENT,
     FINAL_ANSWER_NUDGE, FINAL_STEP_NOTE, FIND_CHANGES_SCHEMA, FLOW_SOURCE_PLAIN, FLOW_SOURCE_TECHNICAL,
     GET_FILTERS_SCHEMA, HISTORY_MESSAGES, HISTORY_RECORD_CAP, HISTORY_SCHEMA, MODEL_LIST_CAP, NO_CHART,
@@ -1002,6 +1003,13 @@ STYLE
         drop = [c for c in charts for d in charts if c is not d and c.get("model") == d.get("model")
                 and c.get("measure") == d.get("measure") and c.get("groupby") and d.get("groupby")
                 and len(d["groupby"]) > len(c["groupby"]) and d["groupby"][:len(c["groupby"])] == c["groupby"]]
+        if not COMPARE_INTENT.search(state.get("question") or ""):
+            # The same chart drawn again with other filters (a first attempt, then the corrected one): the last one
+            # is the answer ("ignore the other chart" must never be needed).
+            last = {json.dumps([c.get("model"), c.get("groupby"), c.get("measure"), c.get("chart_type")]): c
+                    for c in charts}
+            drop += [c for c in charts if last[json.dumps([c.get("model"), c.get("groupby"), c.get("measure"),
+                                                           c.get("chart_type")])] is not c]
         if NO_CHART.search(text or ""):
             drop += charts  # "there is nothing to chart": a chart drawn before the AI found no data is wrong
         # A blank table (no columns and no rows) shows nothing; the text already says nothing matched.

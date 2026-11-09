@@ -126,10 +126,21 @@ class AiAgentEngineScope(models.AbstractModel):
         target = Menu.browse()
         model = arguments.get("model")
         if isinstance(model, str) and model in self.env:
+            # In an app the user can open: Odoo can list a sub-menu as visible while its app is hidden.
             with_model = visible.filtered(lambda m: m.action and m.action._name == "ir.actions.act_window"
-                                          and m.action.sudo().res_model == model)
+                                          and m.action.sudo().res_model == model and root_of(m) in roots)
             target = with_model.sorted(lambda m: (len(m.parent_path or ""), m.sequence))[:1]
         root = best(roots, arguments.get("app"), lambda m: m.name) or (root_of(target) if target else Menu.browse())
+        if not root and arguments.get("menu"):
+            # The app has another name here (invoices are in Invoicing, not Accounting, in Community): find the
+            # screen by its menu path among the menus this user can open.
+            # Exact path words only: a "close enough" match across all apps would open another screen.
+            words = " ".join(str(arguments["menu"]).casefold().replace(">", " ").replace("/", " ").split())
+            paths = visible.filtered(lambda m: m.action and m.parent_id and words and " ".join(
+                (m.complete_name or "").casefold().replace("/", " ").split()).endswith(words))
+            # Odoo can list a sub-menu as visible while its app is hidden from the user: the app must be openable.
+            target = paths.filtered(lambda m: root_of(m) in roots).sorted(lambda m: len(m.complete_name or ""))[:1]
+            root = root_of(target) if target else root
         if not root:
             known = self._app_unavailable(arguments.get("app"), arguments.get("menu"), best, root_of)
             if known:
@@ -374,13 +385,8 @@ class AiAgentEngineScope(models.AbstractModel):
     def _app_unavailable(self, app, menu, best, root_of):
         """An app the user cannot open: not in this edition, not installed, or installed without access."""
         wanted = " ".join(str(app or "").casefold().split())
-        if wanted:
-            modules = self.env["ir.module.module"].sudo().search([("state", "!=", "installed")]).filtered(
-                lambda m: " ".join((m.shortdesc or "").casefold().split()) == wanted)
-            module = modules.sorted(lambda m: not m.application)[:1]
-            if module:
-                return self._unavailable_text(module.shortdesc, module.state)
-        # Installed, but its menus are hidden from this user (e.g. Invoicing for a sales user).
+        # First: installed, but its menus are hidden from this user (e.g. Invoicing for a sales user). Checked
+        # before uninstalled modules, so "Accounting > Invoices" is "no access to Invoicing", not "not available".
         Menu = self.env["ir.ui.menu"].sudo()
         hidden = best(Menu.search([("parent_id", "=", False)]), app, lambda m: m.name) if wanted else Menu.browse()
         if not hidden and menu:
@@ -391,6 +397,12 @@ class AiAgentEngineScope(models.AbstractModel):
         if hidden and not self._is_admin():
             return _("You don't have access to %s, so I can't open it. An administrator can give you access in "
                      "Settings > Users.", hidden.name)
+        if wanted and not hidden:
+            modules = self.env["ir.module.module"].sudo().search([("state", "!=", "installed")]).filtered(
+                lambda m: " ".join((m.shortdesc or "").casefold().split()) == wanted)
+            module = modules.sorted(lambda m: not m.application)[:1]
+            if module:
+                return self._unavailable_text(module.shortdesc, module.state)
         return None
 
     @api.model
