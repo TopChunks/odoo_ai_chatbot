@@ -100,8 +100,8 @@
 
     <t t-name="odoo_ai_agent.BlockExport">
         <div class="btn-group btn-group-sm o-ai-agent-export">
-            <button class="btn btn-light" title="Export to Excel" t-on-click="() => this.export('xlsx')"><i class="fa fa-file-excel-o"/></button>
-            <button class="btn btn-light" title="Export to PDF" t-on-click="() => this.export('pdf')"><i class="fa fa-file-pdf-o"/></button>
+            <button class="btn o_ai_agent_export_xlsx" title="Export to Excel" t-on-click="() => this.export('xlsx')"><i class="fa fa-file-excel-o"/></button>
+            <button class="btn o_ai_agent_export_pdf" title="Export to PDF" t-on-click="() => this.export('pdf')"><i class="fa fa-file-pdf-o"/></button>
         </div>
     </t>
 
