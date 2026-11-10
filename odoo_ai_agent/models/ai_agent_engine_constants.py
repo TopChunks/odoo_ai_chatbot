@@ -407,7 +407,9 @@ CANT_SEE = re.compile(r"\s*[^.!?\n]*\bI (?:can't|cannot|can not|don't|do not) (?
 REFUSAL_REASON = re.compile(r"\b(?:access|rights?|permission|allowed|private|restricted|confidential|not enabled)\b",
                             re.IGNORECASE)
 # "(product ID 39)", "(reference 96)": internal record numbers the user never sees in Odoo.
-RECORD_ID_MENTION = re.compile(r"\s*\((?:[a-z]+ ){0,2}(?:ID|reference|ref\.?)\s*:?\s*#?\d+\)", re.IGNORECASE)
+RECORD_ID_MENTION = re.compile(r"\s*\((?:(?:[a-z]+ ){0,2}(?:ID|reference|ref\.?)|(?:lead|opportunity|order|quotation|invoice|"
+                               r"bill|payment|product|contact|customer|vendor|partner|user|employee|task|project|"
+                               r"transfer|picking|move|stage|record))\s*:?\s*#?\d+\)", re.IGNORECASE)
 ASKS_FOR_IDS = re.compile(r"\bids?\b", re.IGNORECASE)
 # The answer check, applied in this order to every answer (AiAgentEngine._clean_answer). Each rule: name, pattern,
 # replacement, and when it applies: "always", "data" (the answer shows Odoo results), "complete" (every table shown
