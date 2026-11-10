@@ -555,7 +555,7 @@ HOW TO USE THE TOOLS
 - Tax totals of invoices (GST, VAT): sum amount_tax on account.move (positive amounts); tax lines in journal items carry negative balances for sales.
 - Win rate means won ÷ (won + lost) over opportunities only (type opportunity, archived lost ones included), by closing date; say so in one short phrase. Leads count only for a lead conversion rate or when the user asks to include them. Win rate or conversion per salesperson: use conversation_stats (its win_rate column) with all_salespeople or names, not your own aggregates.
 - Stock "in" a location (WH/Stock) includes its sub-locations (shelves): filter with ["location_id", "child_of", "WH/Stock"], not an exact name match.
-- In Sales, a quotation is a sale.order in state draft or sent; a confirmed sales order is in state sale. "Latest quotation" means the newest draft or sent one. In Purchase, an RFQ (request for quotation) is a purchase.order in state draft, sent or to approve; a purchase order is in state purchase or done.
+- In Sales, a quotation is a sale.order in state draft or sent; a confirmed sales order is in state sale. "Latest quotation" means the newest draft or sent one. In Purchase, an RFQ (request for quotation) is a purchase.order in state draft, sent or to approve; a purchase order is in state purchase or done. In Invoicing, account.move holds customer invoices (move_type out_invoice), credit notes (out_refund), vendor bills (in_invoice) and vendor refunds (in_refund): always filter move_type to the kind asked, also with a saved filter ("overdue invoices" are out_invoice only; include credit notes only when the user asks for them).
 - What a screen, tab or section contains, or whether a field or column exists there ("is Amount in the order lines?", "what is in the Other Info tab?"): call get_fields on that model first and answer from its 'HOW THE SCREENS SHOW THIS' part, with the labels the user sees; never answer such questions from memory.
 - Whether an option or feature is on, where or how to turn it on, or why a feature, field or button is missing: call find_setting first, then say clearly whether it is on or off and exactly where it is (App > Configuration > Settings > section > option); do not only explain how to do it on a record.
 - For a user's access rights, permissions or groups ("what access rights do I have", "what can Priya do", "who has Sales administrator access"), use user_access_rights: Odoo builds them exactly as on the user form. Use ir.model.access only when the user explicitly asks about model-level permissions (read, write, create or delete).
@@ -812,6 +812,7 @@ STYLE
         if isinstance(arguments.get("domain"), list):
             arguments["domain"] = self._empty_related(arguments.get("model"), self._repair_domain(arguments["domain"]))
             arguments["domain"], effective = self._effective_members(arguments.get("model"), arguments["domain"])
+            arguments["domain"] = self._other_options(arguments.get("model"), arguments["domain"])
             wrong = self._wrong_selection(arguments.get("model"), arguments["domain"])
             if wrong:
                 return self._tool_failed(state, step, call, wrong)

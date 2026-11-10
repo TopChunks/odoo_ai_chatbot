@@ -13,8 +13,8 @@ from odoo.exceptions import UserError
 from odoo.addons.mcp_server.controllers import utils as mcp_utils
 
 from .ai_agent_engine_constants import (
-    ARCHIVED_NOTE_MODELS, CELL_TEXT_CAP, COST_FIELDS, COST_HIDDEN, NAME_HINT_MODELS, SCHEMA_TEXT_CAP, SHARED_TEXT_CAP,
-    TABLE_ROW_CAP,
+    ARCHIVED_NOTE_MODELS, CELL_TEXT_CAP, COST_FIELDS, COST_HIDDEN, DUPLICATE_CHECK_MODELS, NAME_HINT_MODELS,
+    SCHEMA_TEXT_CAP, SHARED_TEXT_CAP, TABLE_ROW_CAP,
 )
 
 _logger = logging.getLogger(__name__)
@@ -397,8 +397,26 @@ class AiAgentEngineRead(models.AbstractModel):
         return (
             f"[{ref}] {total} {label} record(s) that this user can access match; {len(rows)} rows with the columns "
             f"{self._column_text(columns)}. Record IDs: {ids[:60]}.{linked}{more}{facts}"
-            f"{self._exact_name(model, arguments, ids)}{archived}"
+            f"{self._exact_name(model, arguments, ids)}{archived}{self._duplicate_rows(model, columns, rows, state)}"
         )
+
+    @api.model
+    def _duplicate_rows(self, model, columns, rows, state):
+        """Separate records showing exactly the same values (two "Arul Selvan" contacts with one email and phone):
+        Odoo says they may be duplicates. Only master data (contacts, products, employees, users): two identical
+        stock moves or order lines are separate movements, not duplicates."""
+        if model not in DUPLICATE_CHECK_MODELS:
+            return ""
+        seen = {}
+        for row in rows:
+            values = json.dumps([row.get(c["name"]) for c in columns], default=str)
+            seen[values] = seen.get(values, 0) + 1
+        repeated = sum(count for count in seen.values() if count > 1)
+        if len(columns) < 2 or not repeated:
+            return ""
+        self._add_notice(state, _("%s rows show exactly the same values: they may be duplicate records.", repeated),
+                         "info")
+        return f" {repeated} rows show exactly the same values (the user was told they may be duplicate records)."
 
     @api.model
     def _linked_ids(self, model, rows, state):

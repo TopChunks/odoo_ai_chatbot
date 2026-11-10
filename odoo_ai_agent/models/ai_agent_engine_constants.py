@@ -308,7 +308,9 @@ HANDBACK = re.compile(r"\s*[^.!?\n]*(?:\bI can(?:'|no)t name\b|\bthere for you t
                       r"\bto (?:find|see|spot)\b|\b(?:calculated|computed)\b[^.!?\n]*\b(?:isn't|is not|wasn't|not) "
                       r"shown\b|\bso (?:that )?you can (?:see|check|tell|confirm) (?:whether|if)\b|"
                       r"\bif\b[^.!?\n]*\b(?:doesn't|does not|don't|do not) (?:appear|show up)\b|"
-                      r"\b(?:can't|cannot|can not) tell\b[^.!?\n]{0,40}\bwhether\b)[^.!?\n]*[.!?]",
+                      r"\b(?:can't|cannot|can not) tell\b[^.!?\n]{0,40}\bwhether\b|"
+                      r"\bcheck the\b[^.!?\n]{0,40}\bcolumns?\b|\b(?:can't|cannot|can not) see\b[^.!?\n]*\bmyself\b)"
+                      r"[^.!?\n]*[.!?]",
                       re.IGNORECASE)
 COMPARE_INTENT = re.compile(r"\b(?:compare|comparison|versus|vs\.?|difference between)\b", re.IGNORECASE)
 CHART_INTENT = re.compile(r"\b(?:chart|graph|plot|visuali[sz]ation|visuali[sz]e)\b", re.IGNORECASE)
@@ -371,6 +373,8 @@ DATA_USED = re.compile(r"\b(?:under|in|see)\s+(?:the\s+)?[\"'\u201c]?data used\b
 DATA_USED_NUDGE = ("(The 'data used' section is folded and only lets the user check the answer; it is not part of it. "
                    "Present every result your answer talks about with the present tool (one item per result), then "
                    "answer again and refer to them as shown below.)")
+# Master data where identical rows may be duplicate records (transactions repeat legitimately).
+DUPLICATE_CHECK_MODELS = {"res.partner", "product.product", "product.template", "hr.employee", "res.users"}
 # Product costs, stock values and margins, per model: only for users with one of COST_GROUPS (buying, accounting or
 # inventory administration); others get the rest of the data, never these values or filters on them.
 COST_FIELDS = {

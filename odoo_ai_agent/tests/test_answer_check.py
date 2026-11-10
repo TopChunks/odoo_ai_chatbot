@@ -48,6 +48,11 @@ CASES = [
      "Show quotations created this week.", [TABLE], False, "No quotations were created this week."),
     ("telling which one kept", "I can't tell which customer you mean: two contacts match.", "", [TABLE], False,
      "I can't tell which customer you mean: two contacts match."),
+    ("check the column removed",
+     "No, it has not been shipped. I can't see the exact status text myself, so check the Status column for whether "
+     "it's waiting or ready.", "Has the delivery been shipped?", [TABLE], False, "No, it has not been shipped."),
+    ("column word in data kept", "The Status column of the order is Sales Order.", "", [TABLE], False,
+     "The Status column of the order is Sales Order."),
     ("cannot see the values removed", "Here are the invoices. I can't see the amounts, but they are in the table.",
      "", [TABLE], False, "Here are the invoices."),
     ("check yourself removed", "Here are the orders. Please compare the totals yourself.", "", [TABLE], False,

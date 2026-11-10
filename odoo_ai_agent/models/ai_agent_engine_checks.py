@@ -338,6 +338,27 @@ class AiAgentEngineChecks(models.AbstractModel):
         return out, list(dict.fromkeys(switched))
 
     @api.model
+    def _other_options(self, model, domain):
+        """"Not fully received" means the other statuses: (status, '!=', X) on a selection field also matches records
+        with no status at all (nothing to receive), which the user never means. So "!=" / "not in" on a selection is
+        rewritten to "in" the remaining options, like Odoo's own filters ("Not Received", "Partially Received").
+        Explicit empty values (!= False) are kept as written."""
+        if not model or model not in self.env:
+            return domain
+        out = []
+        for term in domain:
+            if isinstance(term, (list, tuple)) and len(term) == 3 and term[1] in ("!=", "not in") \
+                    and isinstance(term[0], str) and "." not in term[0]:
+                field = self.env[model]._fields.get(term[0])
+                values = term[2] if isinstance(term[2], (list, tuple)) else [term[2]]
+                if field is not None and field.type == "selection" and values and all(
+                        isinstance(v, str) and v for v in values):
+                    options = [key for key, _label in field._description_selection(self.env)]
+                    term = [term[0], "in", [key for key in options if key not in values]]
+            out.append(term)
+        return out
+
+    @api.model
     def _domain(self, arguments):
         """The tool's domain as a list (MCP accepts it as a list or a JSON string)."""
         return self.env["mcp.mixin"]._coerce_domain(arguments.get("domain")) or []
