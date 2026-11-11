@@ -125,7 +125,7 @@ Odoo shows *"Order S00042 has a line with a discount above 20%…"* → click **
 5. [Everything it can do](#5-everything-it-can-do)
 6. [Questions to try](#6-questions-to-try)
 7. [Privacy: exactly what is sent](#7-privacy-exactly-what-is-sent)
-8. [MCP Server: what it is, and cautions](#8-mcp-server-what-it-is-and-cautions)
+8. [MCP Server: how it works with the chatbot](#8-mcp-server-how-it-works-with-the-chatbot)
 9. [Always check before you click Confirm](#9-always-check-before-you-click-confirm)
 10. [Choosing a model and keeping costs low](#10-choosing-a-model-and-keeping-costs-low)
 11. [Updating to a new version](#11-updating-to-a-new-version)
@@ -252,14 +252,53 @@ C:\Odoo>venv\Scripts\activate
 
 Leave this window open: Odoo runs while it is open. Then open **http://localhost:8069** in your browser.
 
-### Step 7: Install AI Agent in Odoo
+### Step 7: Install AI Agent in your database
 
-1. Log in as an administrator.
+**1. Stop Odoo** with **Ctrl + C** in its window.
+
+**2. Install the module from Command Prompt, then start Odoo again.** Replace `YOUR_DATABASE` with your database name:
+
+```
+C:\Users\YourName>cd..
+
+C:\Users>cd..
+
+C:\>cd Odoo\custom-addons
+
+C:\Odoo\custom-addons>git pull origin main
+
+C:\Odoo\custom-addons>cd ..
+
+C:\Odoo>venv\Scripts\activate
+
+(venv) C:\Odoo>cd odoo
+
+(venv) C:\Odoo\odoo>python odoo-bin -c C:\Odoo\odoo.conf -d YOUR_DATABASE -i odoo_ai_agent --stop-after-init
+
+(venv) C:\Odoo\odoo>python odoo-bin -c C:\Odoo\odoo.conf
+```
+
+| Command | What it does |
+|---|---|
+| `git pull origin main` | Makes sure you have the latest version of AI Agent |
+| `python odoo-bin … -i odoo_ai_agent --stop-after-init` | **Installs** AI Agent (and MCP Server with it) in your database, then stops by itself |
+| `python odoo-bin -c C:\Odoo\odoo.conf` | Starts Odoo normally again |
+
+> 💡 **`-i` installs, `-u` upgrades.** Use `-i odoo_ai_agent` the first time. For every later update, use the same steps with `-u odoo_ai_agent` ([section 11](#11-updating-to-a-new-version)).
+
+**3.** Open **http://localhost:8069**, log in as an administrator, and press **Ctrl + Shift + R**. The **AI Agent** app is now on the home screen.
+
+When AI Agent is installed, MCP Server is switched on and a starter set of common records (contacts, CRM, sales, invoices, products, stock, projects, employees…) is enabled **for reading**.
+
+<details>
+<summary><b>Prefer clicking? Install from the Apps screen instead</b></summary>
+
+1. Start Odoo normally and log in as an administrator.
 2. Turn on **developer mode**: *Settings* → scroll to the bottom → **Activate the developer mode**.
 3. Go to **Apps** → **Update Apps List** → **Update**.
 4. Remove the *Apps* filter from the search bar, search for **AI Agent** and click **Activate**.
 
-MCP Server is installed automatically with it, switched on, and a starter set of common records (contacts, CRM, sales, invoices, products, stock, projects, employees…) is enabled **for reading**.
+</details>
 
 ---
 
@@ -299,7 +338,7 @@ Go to **Settings → Users**, open a user, and under **Access Rights → AI Agen
 | **User** | Chat with the AI, open Business Flow, see their own usage. |
 | **Administrator** | Everything above, plus the settings, everyone's usage and cost, and updating the business flow context. |
 
-> Users do **not** need the *MCP User* group. That group is only for connecting **outside** AI apps to Odoo ([section 8](#8-mcp-server-what-it-is-and-cautions)).
+> Users do **not** need the *MCP User* group. That group is only for connecting **outside** AI apps to Odoo ([section 8](#8-mcp-server-how-it-works-with-the-chatbot)).
 
 ### Step ⑤: Optional settings
 
@@ -440,9 +479,67 @@ All the settings from [section 3](#3-first-time-setup-in-order): AI provider, AP
 
 ---
 
-## 8. MCP Server: what it is, and cautions
+## 8. MCP Server: how it works with the chatbot
 
-**MCP (Model Context Protocol)** is a standard way for an AI to use tools. The **MCP Server** module gives Odoo a set of safe tools (*search records, read a record, total by group, create a record…*) and **checks every call against the user's access rights**. AI Agent runs these tools **inside Odoo**, with no extra server to install.
+**MCP (Model Context Protocol)** is a standard way for an AI to use *tools*. The **MCP Server** module gives Odoo a set of safe tools, and AI Agent is built on top of them.
+
+### How MCP works with the chatbot
+
+Think of MCP Server as a **counter clerk** between the AI and your database. The AI can't walk into the stockroom. It can only hand the clerk a request slip, and the clerk checks every slip before doing anything.
+
+```
+ 👤 User:  "How many open opportunities do I have?"
+      │
+      ▼
+ ┌──────────────────────── Inside your Odoo server ─────────────────────────┐
+ │                                                                          │
+ │  AI Agent ──① question + list of tools──►  🤖 AI provider (outside)      │
+ │     ▲                                          │                         │
+ │     │        ② "use search_records on          │                         │
+ │     │            crm.lead, filter: open,       │                         │
+ │     │            mine"  ◄──────────────────────┘                         │
+ │     │                                                                    │
+ │     ▼                                                                    │
+ │  MCP Server checks the request:                                          │
+ │     ✔ Is "CRM Lead" enabled in Manage MCP models?                        │
+ │     ✔ Is "Read" allowed on it?                                           │
+ │     ✔ Is THIS user allowed to see these records (access rights, rules)?  │
+ │     │                                                                    │
+ │     ▼                                                                    │
+ │  ③ Odoo runs the search as the user  →  finds 7 opportunities            │
+ │     │                                                                    │
+ │     ├──► ④ to the user:  a table with the 7 real opportunities           │
+ │     └──► ⑤ to the AI:    only "7 found" and their ID numbers ───────────────► 🤖
+ │                                                                          │
+ └──────────────────────────────────────────────────────────────────────────┘
+      │
+      ▼
+ 🤖 AI:  "You have 7 open opportunities. They are listed below."
+```
+
+**Step by step:**
+
+1. **The AI gets a menu of tools, not your data.** With each question, AI Agent tells the AI which MCP tools exist and which record types are enabled (for example *"CRM Lead: read"*). This list comes from **Manage MCP models**.
+2. **The AI picks a tool and fills in the request.** For example: *search records of type CRM Lead, only open ones, only mine.*
+3. **MCP Server checks the request** before anything runs:
+   - the record type must be enabled in **Manage MCP models**;
+   - the action (read, create, update, delete, buttons) must be ticked for it;
+   - the **user who asked** must have the Odoo access rights for it, and record rules still apply.
+
+   If any check fails, nothing runs and the user gets a clear message.
+4. **Odoo runs the tool inside your server, as that user.** AI Agent calls MCP Server's tools directly in Odoo: there is no extra server, no network hop and no `/mcp` login.
+5. **The results are split.** The **user** sees the real records (tables, cards, charts). The **AI** gets only the count and ID numbers, unless an administrator switched on data sharing.
+6. **Changes become a preview.** Write tools (create, update, delete, buttons) never run straight away. AI Agent shows a preview card, and only the user's **Confirm** runs it, again through MCP Server's checks.
+
+**The MCP tools the chatbot uses:**
+
+| Group | Tools | What they do |
+|---|---|---|
+| **Learn the structure** | `list_models`, `get_fields`, `get_current_context` | Which record types exist, what fields they have, who the user is |
+| **Read data** | `search_records`, `get_record`, `aggregate_records`, `list_record_attachments` | Find records, open one record, totals and counts per group, list attachments |
+| **Change data** (preview + Confirm) | `create_record(s)`, `update_record(s)`, delete and button tools | Prepare a change for the user to confirm |
+
+On top of these, AI Agent adds its own helper tools that also run inside Odoo with the user's rights: charts (`show_chart`), formulas (`calculate`), record history (`get_record_history`, `find_changes`), settings (`find_setting`), access rights (`user_access_rights`), opening screens (`show_app`), saved filters (`get_filters`), chatter statistics (`conversation_stats`) and business flow (`search_business_flow`).
 
 ### Cautions
 
