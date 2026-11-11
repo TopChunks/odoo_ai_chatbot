@@ -10,7 +10,6 @@ class ResConfigSettings(models.TransientModel):
     ai_agent_provider_id = fields.Many2one(
         "ai_agent.provider", string="AI Provider", config_parameter="odoo_ai_agent.provider_id"
     )
-    ai_agent_provider_code = fields.Selection(related="ai_agent_provider_id.code")
     ai_agent_api_key = fields.Char(
         string="API Key", related="ai_agent_provider_id.api_key", readonly=False,
         groups="odoo_ai_agent.group_ai_agent_manager",

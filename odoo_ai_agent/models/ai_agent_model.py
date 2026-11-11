@@ -10,7 +10,6 @@ class AiAgentModel(models.Model):
     name = fields.Char(required=True)
     code = fields.Char("Model ID", required=True, help="Technical model name sent to the provider.")
     provider_id = fields.Many2one("ai_agent.provider", required=True, ondelete="cascade", index=True)
-    provider_code = fields.Selection(related="provider_id.code", store=True)
     provider_sequence = fields.Integer(related="provider_id.sequence", store=True)
     active = fields.Boolean(default=True)
     archived_manually = fields.Boolean(

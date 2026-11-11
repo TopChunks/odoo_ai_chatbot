@@ -430,31 +430,25 @@
 
 // Export buttons filled with the file types' own colours (Excel green, PDF red) and a white icon, as their logos
 // are; size and padding are the standard button's, like the other table buttons.
+.btn.o_ai_agent_export_xlsx {
+    --o-ai-agent-export: #1D6F42;
+}
+.btn.o_ai_agent_export_pdf {
+    --o-ai-agent-export: #D93025;
+}
 .btn.o_ai_agent_export_xlsx,
 .btn.o_ai_agent_export_pdf {
-    color: #fff;
+    &,
     &:hover,
     &:focus,
     &:active {
         color: #fff;
+        background-color: var(--o-ai-agent-export);
+        border-color: var(--o-ai-agent-export);
+    }
+    &:hover,
+    &:focus,
+    &:active {
         filter: brightness(0.9);
-    }
-}
-.btn.o_ai_agent_export_xlsx {
-    &,
-    &:hover,
-    &:focus,
-    &:active {
-        background-color: #1D6F42;
-        border-color: #1D6F42;
-    }
-}
-.btn.o_ai_agent_export_pdf {
-    &,
-    &:hover,
-    &:focus,
-    &:active {
-        background-color: #D93025;
-        border-color: #D93025;
     }
 }

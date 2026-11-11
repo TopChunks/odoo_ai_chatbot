@@ -255,25 +255,13 @@ class AiAgentEngine(models.AbstractModel):
 
     @api.model
     def _log_error_resolution_usage(self, config, reply, error, started):
-        model = config["model"]
         usage = reply.get("usage") or {}
-        self.env["ai_agent.usage"].sudo().create({
-            "user_id": self.env.uid,
-            "provider_id": model.provider_id.id,
-            "model_id": model.id,
-            "model_code": reply.get("model") or model.code,
-            "request_count": 1,
-            "input_tokens": usage.get("input") or 0,
-            "output_tokens": usage.get("output") or 0,
-            "cached_tokens": usage.get("cached") or 0,
-            "cost": model._cost(usage),
-            "duration": time.monotonic() - started,
-            "tool_call_count": 0,
-            "tool_error_count": 1 if error else 0,
-            "tools_used": "error_resolution",
-            "state": "error" if error else "success",
-            "error_message": error or False,
-        })
+        self._log_usage(config, {
+            "answered_by": reply.get("model"), "requests": 1, "input": usage.get("input") or 0,
+            "output": usage.get("output") or 0, "cached": usage.get("cached") or 0,
+            "cost": config["model"]._cost(usage), "tools_used": ["error_resolution"], "tool_calls": 0,
+            "tool_errors": 1 if error else 0,
+        }, error, time.monotonic() - started)
 
     @api.model
     def _deadline(self, timeout):
@@ -690,7 +678,7 @@ STYLE
             error = _("Something went wrong while preparing the answer. Please try again; if it keeps happening, "
                       "an administrator can find the details in the Odoo server log.")
         message = self._post_answer(channel, text, error, state, config)
-        self._log_usage(channel, message, config, state, error, time.monotonic() - started)
+        self._log_usage(config, state, error, time.monotonic() - started, channel, message)
         return {"status": "error" if error else "done", "message_id": message.id}
 
     def _run_loop(self, channel, config, state):
@@ -1007,10 +995,9 @@ STYLE
         if not COMPARE_INTENT.search(state.get("question") or ""):
             # The same chart drawn again with other filters (a first attempt, then the corrected one): the last one
             # is the answer ("ignore the other chart" must never be needed).
-            last = {json.dumps([c.get("model"), c.get("groupby"), c.get("measure"), c.get("chart_type")]): c
-                    for c in charts}
-            drop += [c for c in charts if last[json.dumps([c.get("model"), c.get("groupby"), c.get("measure"),
-                                                           c.get("chart_type")])] is not c]
+            same = lambda c: json.dumps([c.get(k) for k in ("model", "groupby", "measure", "chart_type")])  # noqa: E731
+            last = {same(c): c for c in charts}
+            drop += [c for c in charts if last[same(c)] is not c]
         if NO_CHART.search(text or ""):
             drop += charts  # "there is nothing to chart": a chart drawn before the AI found no data is wrong
         # A blank table (no columns and no rows) shows nothing; the text already says nothing matched.
@@ -1052,12 +1039,13 @@ STYLE
         )
 
     @api.model
-    def _log_usage(self, channel, message, config, state, error, duration):
+    def _log_usage(self, config, state, error, duration, channel=None, message=None):
+        """One usage row per AI answer (a chat answer, or error help: no conversation, and not counted as a tool)."""
         model = config["model"] if config else self.env["ai_agent.model"]
         self.env["ai_agent.usage"].sudo().create({
             "user_id": self.env.uid,
-            "channel_id": channel.id,
-            "message_id": message.id,
+            "channel_id": channel.id if channel else False,
+            "message_id": message.id if message else False,
             "provider_id": model.provider_id.id,
             "model_id": model.id,
             "model_code": state.get("answered_by") or model.code,
@@ -1067,7 +1055,7 @@ STYLE
             "cached_tokens": state["cached"],
             "cost": state["cost"],
             "duration": duration,
-            "tool_call_count": len(state["tools_used"]),
+            "tool_call_count": state.get("tool_calls", len(state["tools_used"])),
             "tool_error_count": state["tool_errors"],
             "tools_used": ",".join(dict.fromkeys(state["tools_used"]))[:500],
             "state": "error" if error else "success",
