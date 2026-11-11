@@ -2,6 +2,7 @@ from . import ai_agent_provider
 from . import ai_agent_model
 from . import ai_agent_usage
 from . import ai_agent_flow
+from . import ai_agent_business_flow
 from . import discuss_channel
 from . import mail_message
 from . import ai_agent_engine

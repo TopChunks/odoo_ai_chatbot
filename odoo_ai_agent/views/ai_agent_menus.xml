@@ -12,6 +12,9 @@
               action="ai_agent_home_action"
               groups="group_ai_agent_user"/>
 
+    <menuitem id="menu_ai_agent_business_flow" name="Business Flow" parent="menu_ai_agent_root" sequence="40"
+              action="ai_agent_business_flow_action" groups="group_ai_agent_user"/>
+
     <menuitem id="menu_ai_agent_reporting" name="Reporting" parent="menu_ai_agent_root" sequence="50"
               groups="group_ai_agent_manager"/>
     <menuitem id="menu_ai_agent_usage_dashboard" name="Usage &amp; Cost" parent="menu_ai_agent_reporting"

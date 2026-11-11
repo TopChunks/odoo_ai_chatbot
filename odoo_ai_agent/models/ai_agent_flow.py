@@ -11,6 +11,7 @@ import ast
 import json
 import os
 import re
+from datetime import timedelta
 from pathlib import Path
 
 import odoo
@@ -277,8 +278,14 @@ class AiAgentFlowIndex(models.Model):
         params = self.env["ir.config_parameter"].sudo()
         if params.get_param("odoo_ai_agent.business_flow_enabled") not in ("True", "1", "true"):
             raise UserError(_("Enable business-flow answers before rebuilding the index."))
+        return self._rebuild()
+
+    @api.model
+    def _rebuild(self):
+        """Index the custom code, then build the Business Flow menu from it. No AI provider is called."""
         indexed = [dict(chunk, kind="database") for chunk in self._database_flow_chunks()[:1000]]
-        for module, root in self._custom_modules():
+        modules = self._custom_modules()
+        for module, root in modules:
             if len(indexed) >= MAX_INDEX_CHUNKS:
                 break
             indexed += self._module_chunks(module, root, MAX_INDEX_CHUNKS - len(indexed))
@@ -287,8 +294,22 @@ class AiAgentFlowIndex(models.Model):
             chunk["messages"] = json.dumps(chunk.get("messages") or [], ensure_ascii=False) if chunk.get("messages") else False
         for offset in range(0, len(indexed), 500):
             self.sudo().create(indexed[offset:offset + 500])
-        params.set_param("odoo_ai_agent.business_flow_indexed_at", fields.Datetime.now())
+        # The flows read the custom rules from the index just written, and are then indexed for chat questions.
+        self.sudo().create(self.env["ai_agent.business.flow"]._rebuild({module.name for module, _root in modules}))
+        self.env["ir.config_parameter"].sudo().set_param("odoo_ai_agent.business_flow_indexed_at",
+                                                         fields.Datetime.now())
         return len(indexed)
+
+    @api.model
+    def _cron_refresh(self):
+        """Scheduled update: rebuild when the context is older than the days set in Settings (0 = never)."""
+        params = self.env["ir.config_parameter"].sudo()
+        days = int(params.get_param("odoo_ai_agent.business_flow_refresh_days") or 0)
+        if days <= 0 or params.get_param("odoo_ai_agent.business_flow_enabled") not in ("True", "1", "true"):
+            return
+        last = fields.Datetime.to_datetime(params.get_param("odoo_ai_agent.business_flow_indexed_at") or False)
+        if not last or fields.Datetime.now() - last >= timedelta(days=days):
+            self._rebuild()
 
     @api.model
     def _module_chunks(self, module, root, room):

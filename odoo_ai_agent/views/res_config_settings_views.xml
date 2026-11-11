@@ -54,13 +54,18 @@
                         <setting string="Resolve errors with AI" help="Adds a Resolve with AI button to Odoo error dialogs (validation, access, missing record and server errors). On click, Odoo finds the custom code that raised the error (when the business-flow index below is on) and checks the record it happened on; the AI explains the cause and how to fix it. Record values are sent only if data sharing is on. For a server crash, only the lines of the traceback that are in custom modules are used.">
                             <field name="ai_agent_error_resolution_enabled"/>
                         </setting>
-                        <setting string="Custom business-flow answers" help="Let the AI answer from this instance's own custom modules (standard Odoo and the AI Agent itself are skipped), Studio views and automation rules, and use them to resolve errors. Relevant excerpts are sent to your configured AI provider only when a user asks about a workflow or resolves an error. Rebuild the index after installing or updating custom modules.">
+                        <setting string="Business flow context" help="Lets the AI explain how this database's processes work, and lists them under AI Agent > Business Flow.">
                             <field name="ai_agent_business_flow_enabled"/>
-                            <div class="text-muted small mt-1">
-                                <field name="ai_agent_flow_index_count" class="fw-bold w-auto oe_inline"/> code excerpts indexed
-                                <span invisible="not ai_agent_flow_indexed_at"> · Last refreshed: <field name="ai_agent_flow_indexed_at" class="oe_inline"/></span>
+                            <div class="text-muted small mt-2" invisible="not ai_agent_business_flow_enabled">
+                                <div><b>What it reads:</b> every installed module's documents, stages, buttons and access rights (for the Business Flow menu), the entire code of this database's own custom modules, Studio views and automation rules. Standard Odoo code and the Odoo documentation are not copied: the AI already knows them.</div>
+                                <div class="mt-1"><b>Tokens:</b> updating the context calls no AI and uses no tokens. Each question about a flow or error sends up to about <field name="ai_agent_flow_question_tokens" class="fw-bold w-auto oe_inline"/> tokens of excerpts to your AI provider.</div>
+                                <div class="mt-1"><b>Context:</b> <field name="ai_agent_flow_count" class="fw-bold w-auto oe_inline"/> flows, <field name="ai_agent_flow_index_count" class="fw-bold w-auto oe_inline"/> code excerpts.
+                                    <span invisible="not ai_agent_flow_indexed_at">Last updated: <field name="ai_agent_flow_indexed_at" class="fw-bold oe_inline"/></span>
+                                    <span invisible="ai_agent_flow_indexed_at">Never updated yet.</span>
+                                </div>
+                                <div class="mt-1">Update automatically every <field name="ai_agent_flow_refresh_days" class="w-auto oe_inline"/> days (0 = only with the button). Update now after deploying new code.</div>
                             </div>
-                            <button name="action_ai_agent_rebuild_flow_index" type="object" string="Index installed custom modules" icon="fa-refresh" class="btn-link p-0 mt-1" invisible="not ai_agent_business_flow_enabled"/>
+                            <button name="action_ai_agent_rebuild_flow_index" type="object" string="Update context now" icon="fa-refresh" class="btn-link p-0 mt-1" invisible="not ai_agent_business_flow_enabled"/>
                         </setting>
                     </block>
                     <block title="Limits" name="ai_agent_limits">

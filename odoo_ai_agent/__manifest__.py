@@ -18,7 +18,8 @@ administrator turns on data sharing.
   "AI Agent" tab in the messaging menu
 * Native Odoo graphs and pivots, with PDF and Excel export
 * User-requested explanations for supported validation errors
-* Optional, administrator-indexed custom-module source search for instance-specific workflow answers
+* Optional business flow context: a Business Flow menu (stages, actions, roles) and custom-code answers,
+  updated on demand or every N days
 * Every change (create, update, delete, button) is a preview the user confirms
 * Usage and cost reporting per user, model and provider
 """,
@@ -34,6 +35,7 @@ administrator turns on data sharing.
         "views/ai_agent_provider_views.xml",
         "views/ai_agent_model_views.xml",
         "views/ai_agent_usage_views.xml",
+        "views/ai_agent_business_flow_views.xml",
         "views/res_config_settings_views.xml",
         "views/ai_agent_export_templates.xml",
         "views/ai_agent_menus.xml",

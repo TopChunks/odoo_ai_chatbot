@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="ai_agent_business_flow_view_list" model="ir.ui.view">
+        <field name="name">ai_agent.business.flow.list</field>
+        <field name="model">ai_agent.business.flow</field>
+        <field name="arch" type="xml">
+            <list create="false" edit="false" delete="false">
+                <field name="sequence" column_invisible="True"/>
+                <field name="name"/>
+                <field name="documents"/>
+                <field name="stage_count"/>
+                <field name="action_count"/>
+                <field name="rule_count"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="ai_agent_business_flow_view_form" model="ir.ui.view">
+        <field name="name">ai_agent.business.flow.form</field>
+        <field name="model">ai_agent.business.flow</field>
+        <field name="arch" type="xml">
+            <form create="false" edit="false" delete="false">
+                <sheet>
+                    <div class="oe_title"><h1><field name="name"/></h1></div>
+                    <field name="diagram" nolabel="1"/>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="ai_agent_business_flow_action" model="ir.actions.act_window">
+        <field name="name">Business Flow</field>
+        <field name="res_model">ai_agent.business.flow</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">No business flows yet</p>
+            <p>An AI Agent administrator turns on "Business flow context" in AI Agent settings and clicks
+                "Update context now". Each process then appears here with its stages, actions and who does them.</p>
+        </field>
+    </record>
+
+    <record id="ir_cron_ai_agent_flow_refresh" model="ir.cron">
+        <field name="name">AI Agent: Update business flow context</field>
+        <field name="model_id" ref="model_ai_agent_flow_index"/>
+        <field name="state">code</field>
+        <field name="code">model._cron_refresh()</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">days</field>
+        <field name="active" eval="True"/>
+    </record>
+</odoo>

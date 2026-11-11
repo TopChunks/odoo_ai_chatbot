@@ -6,3 +6,5 @@ access_ai_agent_model_manager,ai_agent.model manager,model_ai_agent_model,group_
 access_ai_agent_usage_user,ai_agent.usage user,model_ai_agent_usage,group_ai_agent_user,1,0,0,0
 access_ai_agent_usage_manager,ai_agent.usage manager,model_ai_agent_usage,group_ai_agent_manager,1,1,1,1
 access_ai_agent_flow_index_manager,ai_agent.flow.index manager,model_ai_agent_flow_index,group_ai_agent_manager,1,1,1,1
+access_ai_agent_business_flow_user,ai_agent.business.flow user,model_ai_agent_business_flow,group_ai_agent_user,1,0,0,0
+access_ai_agent_business_flow_manager,ai_agent.business.flow manager,model_ai_agent_business_flow,group_ai_agent_manager,1,1,1,1
