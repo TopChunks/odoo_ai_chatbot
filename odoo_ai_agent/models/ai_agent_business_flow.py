@@ -6,8 +6,8 @@ rights). No AI provider is called, so building it costs no tokens. A text copy o
 so chat questions such as "what happens after the quotation?" find it.
 """
 
+import ast
 import json
-import re
 
 from markupsafe import Markup
 
@@ -29,11 +29,100 @@ STANDARD_FLOWS = [
     ("Time Off", [("hr.leave", "Time Off Request")]),
     ("Expenses", [("hr.expense", "Expense")]),
 ]
-STATE_CLAUSE = re.compile(r"\(?\s*state\s*(not in|in|!=|==)\s*(\[[^\]]*\]|\([^)]*\)|'[^']*'|\"[^\"]*\")\s*\)?")
 SKIP_ACTIONS = {"Print", "Preview"}  # on every document, not a step of the flow
 MAX_STAGES = 12
 MAX_ACTIONS = 15
 MAX_RULES = 8
+
+
+OPPOSITE = {ast.Eq: ast.NotEq, ast.NotEq: ast.Eq, ast.In: ast.NotIn, ast.NotIn: ast.In,
+            ast.Gt: ast.LtE, ast.LtE: ast.Gt, ast.GtE: ast.Lt, ast.Lt: ast.GtE}
+OPERATOR_WORDS = {ast.Eq: "is", ast.NotEq: "is not", ast.In: "is one of", ast.NotIn: "is not one of",
+                  ast.Gt: "is more than", ast.GtE: "is at least", ast.Lt: "is less than", ast.LtE: "is at most"}
+
+
+def opposite(first, second):
+    """Whether two condition words are each other's opposite ("Locked" / "not Locked", "is set" / "is empty")."""
+    pairs = [("not ", ""), (" is empty", " is set"), (" is not ", " is ")]
+    for one, other in pairs:
+        if first.replace(one, other, 1) == second or second.replace(one, other, 1) == first:
+            return first != second
+    return False
+
+
+def merge_opposites(conditions):
+    """One action drawn as two buttons that differ in one opposite condition (a highlighted and a plain "Send")
+    is available whatever that condition is: drop it. [(stage keys, words)] in, the same out."""
+    conditions = list(conditions)
+    merged = True
+    while merged:
+        merged = False
+        for i, (keys_a, words_a) in enumerate(conditions):
+            for j in range(i + 1, len(conditions)):
+                keys_b, words_b = conditions[j]
+                parts_a, parts_b = words_a.split(" and "), words_b.split(" and ")
+                if (set(keys_a) != set(keys_b) or " or " in words_a + words_b or len(parts_a) != len(parts_b)):
+                    continue
+                only_a = [p for p in parts_a if p not in parts_b]
+                only_b = [p for p in parts_b if p not in parts_a]
+                if len(only_a) == len(only_b) == 1 and opposite(only_a[0], only_b[0]):
+                    conditions[i] = (keys_a, " and ".join(p for p in parts_a if p in parts_b))
+                    del conditions[j]
+                    merged = True
+                    break
+            if merged:
+                break
+    return conditions
+
+
+def literal(node):
+    """The constant, or list of constants, a rule compares with; None if it is anything else."""
+    try:
+        value = ast.literal_eval(node)
+    except (ValueError, SyntaxError, TypeError):
+        return None
+    return value if isinstance(value, (str, int, float, bool, list, tuple)) else None
+
+
+def simplify(node, state):
+    """The rule with the stage filled in: parts about the stage become True/False and drop out."""
+    known = evaluate(node, state)
+    if known is not None:
+        return ast.Constant(known)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return ast.UnaryOp(ast.Not(), simplify(node.operand, state))
+    if isinstance(node, ast.BoolOp):
+        decisive = isinstance(node.op, ast.Or)
+        values = [simplify(value, state) for value in node.values]
+        values = [v for v in values if not (isinstance(v, ast.Constant) and bool(v.value) != decisive)]
+        return values[0] if len(values) == 1 else ast.BoolOp(node.op, values) if values else ast.Constant(not decisive)
+    return node
+
+
+def evaluate(node, state):
+    """A button's `invisible` rule in one stage: True (hidden), False (shown) or None (depends on other fields)."""
+    if isinstance(node, ast.Constant):
+        return bool(node.value)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        value = evaluate(node.operand, state)
+        return None if value is None else not value
+    if isinstance(node, ast.BoolOp):
+        values = [evaluate(value, state) for value in node.values]
+        decisive = isinstance(node.op, ast.Or)  # True decides an "or", False decides an "and"
+        if decisive in values:
+            return decisive
+        return None if None in values else not decisive
+    if isinstance(node, ast.Name) and node.id == "state":
+        return bool(state)
+    if (isinstance(node, ast.Compare) and len(node.ops) == 1 and isinstance(node.left, ast.Name)
+            and node.left.id == "state" and literal(node.comparators[0]) is not None):
+        value, operator = literal(node.comparators[0]), node.ops[0]
+        values = value if isinstance(value, (list, tuple)) else [value]
+        if isinstance(operator, (ast.Eq, ast.In)):
+            return state in values
+        if isinstance(operator, (ast.NotEq, ast.NotIn)):
+            return state not in values
+    return None
 
 
 class AiAgentBusinessFlow(models.Model):
@@ -70,17 +159,77 @@ class AiAgentBusinessFlow(models.Model):
         return [], False
 
     @api.model
-    def _shown_in(self, invisible, stages):
-        """Labels of the stages where a button with this `invisible` condition can appear ('' if unclear)."""
-        clauses = [part for part in re.split(r"\s+or\s+", invisible or "") if part.strip()]
-        for clause in clauses:
-            match = STATE_CLAUSE.fullmatch(clause.strip())
-            if not match:
-                continue
-            listed = {a or b for a, b in re.findall(r"'([^']*)'|\"([^\"]*)\"", match.group(2))}
-            hidden_when_listed = match.group(1) in ("in", "==")
-            return ", ".join(label for key, label in stages if (key in listed) != hidden_when_listed)
-        return "" if clauses else _("Any stage")
+    def _available(self, model, invisible, stages, by_state):
+        """When a button with this `invisible` rule can be pressed: (stage keys, the other conditions in words).
+
+        The rule is read with Python's parser and evaluated per stage with three values (hidden, shown, depends on
+        other fields), so a stage is listed unless the rule surely hides the button there. Conditions on other
+        fields are turned into words from Odoo's own field and value labels; nothing is guessed."""
+        try:
+            tree = ast.parse((invisible or "False").strip(), mode="eval").body
+        except SyntaxError:
+            return [([key for key, _label in stages], _("other conditions allow it"))]
+        if not by_state:
+            return [([], self._words(model, tree, True, by_state))]
+        by_words = {}
+        for key, _label in stages:
+            rest = simplify(tree, key)  # the rule once the stage is known: what else it depends on there
+            if not (isinstance(rest, ast.Constant) and rest.value):
+                by_words.setdefault(self._words(model, rest, True, by_state), []).append(key)
+        return [(keys, words) for words, keys in by_words.items()]
+
+    @api.model
+    def _words(self, model, node, negate, by_state):
+        """`node` (or its opposite when negate) in plain words, leaving out what the stage list already says."""
+        if by_state and "state" in {n.id for n in ast.walk(node) if isinstance(n, ast.Name)} and not any(
+                isinstance(n, ast.Name) and n.id != "state" for n in ast.walk(node)):
+            return ""
+        if isinstance(node, ast.Constant):
+            return ""
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            return self._words(model, node.operand, not negate, by_state)
+        if isinstance(node, ast.BoolOp):
+            joiner = _(" and ") if isinstance(node.op, ast.Or) == negate else _(" or ")
+            other = _(" or ") if joiner == _(" and ") else _(" and ")
+            parts = [self._words(model, value, negate, by_state) for value in node.values]
+            parts = [f"({part})" if other in part else part for part in parts]  # "A and (B or C)"
+            return joiner.join(dict.fromkeys(part for part in parts if part))
+        name = (node.id if isinstance(node, ast.Name)
+                else getattr(node.left, "id", None) if isinstance(node, ast.Compare) else None)
+        if name == "id":
+            return ""  # "the record is saved": not a business condition
+        field = self.env[model]._fields.get(node.id) if isinstance(node, ast.Name) else None
+        if field:
+            if field.type == "boolean":
+                return (_("not %s", field.string) if negate else field.string)
+            return (_("%s is empty", field.string) if negate else _("%s is set", field.string))
+        if (isinstance(node, ast.Compare) and len(node.ops) == 1 and type(node.ops[0]) in OPPOSITE
+                and isinstance(node.left, ast.Name) and node.left.id in self.env[model]._fields
+                and literal(node.comparators[0]) is not None):
+            field = self.env[model]._fields[node.left.id]
+            names = dict(field._description_selection(self.env)) if field.type == "selection" else {}
+            values = literal(node.comparators[0])
+            values = values if isinstance(values, (list, tuple)) else [values]
+            text = ", ".join(f'"{names.get(value, value)}"' if isinstance(value, str) else str(value)
+                             for value in values)
+            operator = OPPOSITE[type(node.ops[0])] if negate else type(node.ops[0])
+            if operator in (ast.In, ast.NotIn) and len(values) == 1:
+                operator = ast.Eq if operator is ast.In else ast.NotEq
+            return f"{field.string} {OPERATOR_WORDS[operator]} {text}"
+        return _("other conditions allow it")
+
+    @api.model
+    def _when(self, conditions, stages, by_state):
+        """Text of the merged (stage keys, words) pairs of one action."""
+        labels = dict(stages)
+        conditions = merge_opposites(conditions)
+        texts = []
+        for words in dict.fromkeys(words for _keys, words in conditions):
+            keys = {key for stage_keys, other in conditions if other == words for key in stage_keys}
+            stage_text = (_("Any stage") if not by_state or len(keys) == len(stages)
+                          else ", ".join(labels[key] for key, _label in stages if key in keys))
+            texts.append(_("%(stages)s, when %(words)s", stages=stage_text, words=words) if words else stage_text)
+        return _("; or ").join(texts)
 
     @api.model
     def _editors(self, model):
@@ -114,14 +263,14 @@ class AiAgentBusinessFlow(models.Model):
             else:
                 editors = editors or self._editors(model)
                 who = editors
-            when = self._shown_in(button.get("invisible"), stages) if by_state else ""
-            if label in out:  # the same action shown per stage ("Confirm" on a quotation, sent or not)
-                whens = (out[label][0], when)
-                when = ("" if not all(whens) else _("Any stage") if _("Any stage") in whens
-                        else ", ".join(name for _key, name in stages if name in ", ".join(whens).split(", ")))
-                who = out[label][1]
-            out[label] = (when, who)
-        return [(label, when, who) for label, (when, who) in out.items()][:MAX_ACTIONS]
+            available = self._available(model, button.get("invisible"), stages, by_state)
+            if not available:
+                continue  # hidden in every stage
+            # The same action is often one button per stage ("Confirm" on a quotation, sent or not): merged.
+            conditions, who = out.get(label, ([], who))
+            out[label] = (conditions + available, who)
+        return [(label, self._when(conditions, stages, by_state), who)
+                for label, (conditions, who) in out.items()][:MAX_ACTIONS]
 
     @api.model
     def _custom_rules(self, model):
