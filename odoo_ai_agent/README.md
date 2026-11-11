@@ -4,135 +4,204 @@
 
 # AI Agent for Odoo 19
 
-### Ask your Odoo anything, in plain words, without handing your data to the AI.
+### Talk to your Odoo in plain words, without sending your business data to an AI company.
 
-*"How many open opportunities do I have?"* · *"Pie chart of this month's sales by product"* · *"Why can't I confirm this order?"*
-
-**Your data stays in Odoo.** The AI decides *what* to look up; Odoo looks it up **with each user's own access rights**
-and shows the answer as tables, cards and charts. Nothing is changed until the user clicks **Confirm**.
+**🔒 Your data stays in Odoo** · **👤 Every user keeps their own access rights** · **✅ Nothing changes until you click Confirm**
 
 </div>
 
 ---
 
-## Contents
+## 🎯 The main idea, in one minute
 
-1. [Why AI Agent? Your data stays in Odoo](#1-why-ai-agent-your-data-stays-in-odoo)
-2. [What you need](#2-what-you-need)
-3. [Installation, step by step](#3-installation-step-by-step)
-4. [First-time setup in Odoo](#4-first-time-setup-in-odoo)
-5. [Where users find it](#5-where-users-find-it)
-6. [Every feature, explained](#6-every-feature-explained)
-7. [Questions to try](#7-questions-to-try)
-8. [Privacy: exactly what is sent to the AI provider](#8-privacy-exactly-what-is-sent-to-the-ai-provider)
-9. [MCP: what it is, and cautions](#9-mcp-what-it-is-and-cautions)
-10. [Always review changes before you confirm](#10-always-review-changes-before-you-confirm)
-11. [Choosing a model and keeping costs low](#11-choosing-a-model-and-keeping-costs-low)
-12. [Updating to a new version](#12-updating-to-a-new-version)
-13. [Debugging and troubleshooting](#13-debugging-and-troubleshooting)
-14. [Useful links](#14-useful-links)
+Most AI chatbots for Odoo copy your customers, prices, invoices and salaries to an outside AI company (OpenAI, Google and others) so the AI can read them.
 
----
-
-## 1. Why AI Agent? Your data stays in Odoo
-
-Most "AI for Odoo" tools copy your records (customers, prices, invoices, salaries) to an outside AI company so the AI can read them. **AI Agent is built the other way round.**
+**AI Agent works the other way round.** The AI is only the *planner*. Odoo does the actual work, inside your own server:
 
 ```
-   User asks                The AI plans               Odoo does the work              The user sees
- ──────────────           ─────────────────          ─────────────────────          ─────────────────
- "Which invoices    ──►   "search invoices,    ──►   runs the search with     ──►   a table of the real
-  are overdue?"            unpaid, due < today"       the USER's own rights          invoices, in Odoo
-                                   ▲                           │
-                                   └──── only counts and IDs ──┘
-                                        (never names, amounts, emails…)
+  ① You ask                 ② The AI plans               ③ Odoo does the work           ④ You see the answer
+ ─────────────            ──────────────────           ────────────────────────       ─────────────────────
+ "Which invoices    ──►   "search invoices that  ──►   runs the search with     ──►   a table of the real
+  are overdue?"            are unpaid and past          YOUR access rights            invoices, shown by Odoo
+                           their due date"                       │
+                                  ▲                              │
+                                  └──── only "12 found" + IDs ───┘
+                                     never names, amounts or emails
 ```
 
-- The AI provider receives the **question**, the **list of tools** and **field definitions** (for example "an invoice has a *due date*"), and only **how many** records were found and their **IDs**.
-- The **values** (customer names, amounts, phone numbers, notes) are shown to the user **by Odoo** and are **not sent** to the AI provider.
-- An administrator can switch on **data sharing** if they *want* the AI to summarise values in its own words. It is **off by default** (see [section 8](#8-privacy-exactly-what-is-sent-to-the-ai-provider)).
-
-| ✅ AI Agent can | ❌ AI Agent cannot |
+| The AI company receives | The AI company never receives |
 |---|---|
-| Find, count, total, compare and group your records | See records the user is not allowed to see |
-| Draw bar, line and pie charts and pivot tables | Change anything without the user clicking **Confirm** |
-| Show a record's history, changes and conversations | Reveal passwords, API keys or other secrets |
-| Explain Odoo screens and settings, and open them | Act outside Odoo (send WhatsApp messages, book trucks…) |
-| Explain error messages in plain words | Answer questions unrelated to the business (news, sports…) |
-| Prepare a new contact, task or activity for you to confirm | Run tools on data models an administrator has not enabled |
+| ✅ Your question | ❌ Customer names, phone numbers, emails |
+| ✅ The list of tools and field names (*"an invoice has a due date"*) | ❌ Prices, amounts, salaries |
+| ✅ How many records were found, and their ID numbers | ❌ Notes, messages, addresses |
+| | ❌ Passwords, API keys, secrets |
+
+The real values are shown to **you** by **Odoo**. The AI never sees them, so it can't leak them, store them or learn from them.
+
+> 💡 An administrator *can* switch on **data sharing** if they want the AI to summarise values in its own words. It is **off** by default, and we recommend leaving it off.
 
 ---
 
-## 2. What you need
+## 🎬 Demo: what it looks like
 
-| Requirement | Details |
-|---|---|
-| **Odoo 19** | Community or Enterprise. |
-| **MCP Server module** (`mcp_server`) | Required. AI Agent uses its tools to read Odoo safely. [Download it from the Odoo Apps store](https://apps.odoo.com/apps/modules/19.0/mcp_server). |
-| **An AI provider account and API key** | One of: OpenAI, Google Gemini, Anthropic Claude or OpenRouter (links in [section 14](#14-useful-links)). |
-| **Internet access from the Odoo server** | To reach the provider's API. |
-| **Python packages** | `authlib`, `defusedxml` and `packaging` (for MCP Server). `markdown2` is optional (nicer text formatting). |
+### 1. Ask a question, get a real Odoo table
+
+```
+ 👤 You:       Which customer invoices are overdue?
+
+ 🤖 AI Agent:  You have 12 overdue customer invoices. They are listed below.
+
+               ┌─────────────┬──────────────────┬────────────┬───────────┐
+               │ Number      │ Customer         │ Due date   │ Amount    │
+               ├─────────────┼──────────────────┼────────────┼───────────┤
+               │ INV/0042    │ Alpha Cycles     │ 02 Nov     │  4,250.00 │
+               │ INV/0047    │ Ironwood Retail  │ 05 Nov     │  1,980.00 │
+               │ …           │ …                │ …          │ …         │
+               └─────────────┴──────────────────┴────────────┴───────────┘
+                     [ 📥 Excel ]  [ 📄 PDF ]  [ Open in Invoicing ]
+```
+
+The AI only learned *"12 invoices found"*. **Odoo** filled in the table.
+
+### 2. Ask for a chart
+
+```
+ 👤 You:       Pie chart of this month's sales by product
+
+ 🤖 AI Agent:  Here are this month's confirmed sales by product.
+               🥧 [ a real Odoo pie chart: click a slice to open its orders ]
+```
+
+### 3. Ask Odoo to do something, and confirm it yourself
+
+```
+ 👤 You:       Create a contact for Ravi Kumar at Alpha Cycles, phone +91 98765 43210
+
+ 🤖 AI Agent:  ┌───────────────────────────────────────────┐
+               │  Create Contact                           │
+               │  Name:     Ravi Kumar                     │
+               │  Company:  Alpha Cycles                   │
+               │  Phone:    +91 98765 43210                │
+               │                  [ Cancel ]  [ Confirm ]  │
+               └───────────────────────────────────────────┘
+```
+
+Nothing is saved until **you** click **Confirm**.
+
+### 4. Ask how your business works
+
+```
+ 👤 You:       What happens after a quotation is confirmed, and who can confirm it?
+
+ 🤖 AI Agent:  It becomes a Sales Order. A delivery is created for the warehouse, and the
+               order becomes ready to invoice. Any salesperson can confirm it, but in this
+               company an order with a discount above 20% needs a sales manager's approval first.
+```
+
+### 5. See every process on one page: the Business Flow menu
+
+<img src="static/description/screenshots/business_flow_list.png" alt="Business Flow list" width="900"/>
+
+<img src="static/description/screenshots/business_flow_sales.png" alt="Sales flow: stages, actions and who can do them" width="900"/>
+
+### 6. Understand an error in plain words
+
+Odoo shows *"Order S00042 has a line with a discount above 20%…"* → click **Resolve with AI**:
+
+```
+ 🤖 What happened:  The order has a discount above 20%.
+    Why:            Your company requires a sales manager's approval for big discounts.
+    What to do:     Ask a sales manager to tick "Discount approved", then confirm again.
+```
 
 ---
 
-## 3. Installation, step by step (Windows)
+## 📑 Contents
 
-This guide uses the usual Windows layout where Odoo runs from its source code:
+1. [What you need](#1-what-you-need)
+2. [Installation on Windows, step by step](#2-installation-on-windows-step-by-step)
+3. [First-time setup, in order](#3-first-time-setup-in-order)
+4. [The menus, explained](#4-the-menus-explained)
+5. [Everything it can do](#5-everything-it-can-do)
+6. [Questions to try](#6-questions-to-try)
+7. [Privacy: exactly what is sent](#7-privacy-exactly-what-is-sent)
+8. [MCP Server: what it is, and cautions](#8-mcp-server-what-it-is-and-cautions)
+9. [Always check before you click Confirm](#9-always-check-before-you-click-confirm)
+10. [Choosing a model and keeping costs low](#10-choosing-a-model-and-keeping-costs-low)
+11. [Updating to a new version](#11-updating-to-a-new-version)
+12. [Debugging and troubleshooting](#12-debugging-and-troubleshooting)
+13. [Useful links](#13-useful-links)
+
+---
+
+## 1. What you need
+
+| You need | Why |
+|---|---|
+| **Odoo 19** (Community or Enterprise) | AI Agent is made for Odoo 19. |
+| **The MCP Server module** | AI Agent uses its safe tools to read Odoo. It's free: [download it from the Odoo Apps store](https://apps.odoo.com/apps/modules/19.0/mcp_server). |
+| **An API key** from one AI provider | OpenAI, Google Gemini, Anthropic Claude or OpenRouter ([links](#13-useful-links)). |
+| **Internet access** on the Odoo computer | To reach the AI provider. |
+| **Git for Windows** | To download AI Agent and get updates. |
+
+---
+
+## 2. Installation on Windows, step by step
+
+This guide uses this folder layout. If yours is different, use your own paths:
 
 ```
 C:\Odoo\
-├── odoo\              ← Odoo 19 source code (contains odoo-bin)
-├── custom-addons\     ← your extra modules go here
-├── venv\              ← Odoo's Python environment
-└── odoo.conf          ← Odoo configuration file
+├── odoo\              ← Odoo 19 (contains odoo-bin)
+├── custom-addons\     ← extra modules go here
+├── venv\              ← Odoo's Python
+└── odoo.conf          ← Odoo's settings file
 ```
 
-If your folders have other names, use your own paths in the commands below.
+### Step 1: Install Git
 
-### Step 1: Install Git for Windows
-
-Download it from **https://git-scm.com/download/win** and install it with the default options. To check, open a **new** Command Prompt and type:
+Download **Git for Windows** from https://git-scm.com/download/win and install it with the default options.
+Open a **new** Command Prompt and check it works:
 
 ```bat
 git --version
 ```
 
-### Step 2: Create the custom-addons folder
-
-Keep extra modules **outside** Odoo's own folder, so Odoo updates never overwrite them.
+### Step 2: Download AI Agent
 
 ```bat
 mkdir C:\Odoo\custom-addons
 cd /d C:\Odoo\custom-addons
-```
-
-### Step 3: Get AI Agent with git
-
-```bat
 git init
 git remote add origin https://github.com/TopChunks/odoo_ai_chatbot.git
 git pull origin main
 ```
 
-You now have `C:\Odoo\custom-addons\odoo_ai_agent\`.
+You now have the folder `C:\Odoo\custom-addons\odoo_ai_agent\`.
 
-### Step 4: Add the MCP Server module
+### Step 3: Add the MCP Server module
 
-Download **MCP Server** for Odoo 19 from the [Odoo Apps store](https://apps.odoo.com/apps/modules/19.0/mcp_server), unzip it, and put the `mcp_server` folder **next to** `odoo_ai_agent`:
+1. Download **MCP Server** for Odoo 19 from the [Odoo Apps store](https://apps.odoo.com/apps/modules/19.0/mcp_server).
+2. Unzip it.
+3. Put the `mcp_server` folder **next to** `odoo_ai_agent`:
 
 ```
 C:\Odoo\custom-addons\
-├── odoo_ai_agent\      ← AI Agent
-└── mcp_server\         ← MCP Server
+├── odoo_ai_agent\
+└── mcp_server\
 ```
 
-> ⚠️ After unzipping, check that you don't have a folder inside a folder (`mcp_server\mcp_server\`). The folder that contains `__manifest__.py` must sit directly in `C:\Odoo\custom-addons\`.
+> ⚠️ Make sure there's no folder inside a folder (`mcp_server\mcp_server\`). The folder that contains `__manifest__.py` must sit directly in `C:\Odoo\custom-addons\`.
 
-### Step 5: Install the Python packages
+### Step 4: Install the Python packages
 
-In Command Prompt, switch on Odoo's Python environment, then install the packages into it:
+MCP Server needs a few Python packages. Install them into **Odoo's** Python:
 
 ```
+C:\Users\YourName>cd..
+
+C:\Users>cd..
+
 C:\>cd Odoo
 
 C:\Odoo>venv\Scripts\activate
@@ -140,11 +209,11 @@ C:\Odoo>venv\Scripts\activate
 (venv) C:\Odoo>pip install authlib defusedxml packaging markdown2
 ```
 
-> 💡 After `activate`, the prompt starts with `(venv)`. That means `python` and `pip` now use **Odoo's** Python, not another Python on your PC.
+> 💡 After `activate`, the line starts with `(venv)`. That means `python` and `pip` now use Odoo's own Python.
 
-### Step 6: Tell Odoo where the folder is
+### Step 5: Tell Odoo about the custom-addons folder
 
-Open `C:\Odoo\odoo.conf` in Notepad. Find the `addons_path` line and **add** `C:\Odoo\custom-addons` at the end, after a comma. Keep the paths that are already there:
+Open `C:\Odoo\odoo.conf` in Notepad. At the end of the `addons_path` line, add a comma and `C:\Odoo\custom-addons`. Keep what is already there:
 
 ```ini
 [options]
@@ -153,11 +222,11 @@ addons_path = C:\Odoo\odoo\odoo\addons,C:\Odoo\odoo\addons,C:\Odoo\custom-addons
 
 Save the file.
 
-### Step 7: Start (or restart) Odoo
+### Step 6: Start Odoo
 
 If Odoo is already running, stop it first with **Ctrl + C** in its window.
 
-Then open **Command Prompt** (Start menu → type `cmd` → **Command Prompt**). It opens in your user folder. Type the commands shown after each `>` and press **Enter** after each one:
+Open **Command Prompt** (Start menu → type `cmd`). Type each command after the `>` and press **Enter**:
 
 ```
 C:\Users\YourName>cd..
@@ -173,256 +242,252 @@ C:\Odoo>venv\Scripts\activate
 (venv) C:\Odoo\odoo>python odoo-bin -c C:\Odoo\odoo.conf
 ```
 
-What each command does:
-
 | Command | What it does |
 |---|---|
-| `cd..` (twice) | Goes up from your user folder to `C:\` |
-| `cd Odoo` | Goes into the `C:\Odoo` folder |
-| `venv\Scripts\activate` | Switches on Odoo's Python. The prompt now starts with `(venv)` |
-| `cd odoo` | Goes into the Odoo source folder, where `odoo-bin` is |
-| `python odoo-bin -c C:\Odoo\odoo.conf` | Starts Odoo with your configuration file |
+| `cd..` (two times) | Goes up from your user folder to `C:\` |
+| `cd Odoo` | Goes into `C:\Odoo` |
+| `venv\Scripts\activate` | Switches on Odoo's Python |
+| `cd odoo` | Goes into the Odoo folder, where `odoo-bin` is |
+| `python odoo-bin -c C:\Odoo\odoo.conf` | Starts Odoo with your settings file |
 
-Leave this window open: Odoo runs as long as it is open, and shows its log here. Open Odoo in your browser at **http://localhost:8069**.
+Leave this window open: Odoo runs while it is open. Then open **http://localhost:8069** in your browser.
 
-### Step 8: Install the module in Odoo
+### Step 7: Install AI Agent in Odoo
 
 1. Log in as an administrator.
 2. Turn on **developer mode**: *Settings* → scroll to the bottom → **Activate the developer mode**.
 3. Go to **Apps** → **Update Apps List** → **Update**.
-4. Remove the *Apps* filter in the search bar, search **AI Agent** and click **Activate**.
-   MCP Server is installed automatically with it.
+4. Remove the *Apps* filter from the search bar, search for **AI Agent** and click **Activate**.
 
-> 💡 When AI Agent is installed, it switches on MCP Server and enables a starter set of common data models (contacts, CRM, sales, invoices, products, stock, projects, employees…) **for reading**. You can change this list at any time (see [section 4](#4-first-time-setup-in-odoo)).
-
-<details>
-<summary><b>Installing on a Linux server instead?</b></summary>
-
-The same steps with Linux commands (Odoo in `/opt/odoo`, configuration in `/etc/odoo.conf`):
-
-```bash
-sudo mkdir -p /opt/odoo/custom-addons && cd /opt/odoo/custom-addons
-sudo git init
-sudo git remote add origin https://github.com/TopChunks/odoo_ai_chatbot.git
-sudo git pull origin main
-# put the mcp_server folder next to odoo_ai_agent, then:
-/opt/odoo/venv/bin/pip install authlib defusedxml packaging markdown2
-sudo chown -R odoo:odoo /opt/odoo/custom-addons
-# add /opt/odoo/custom-addons to addons_path in /etc/odoo.conf, then:
-sudo systemctl restart odoo
-```
-
-</details>
+MCP Server is installed automatically with it, switched on, and a starter set of common records (contacts, CRM, sales, invoices, products, stock, projects, employees…) is enabled **for reading**.
 
 ---
 
-## 4. First-time setup in Odoo
+## 3. First-time setup, in order
 
-Open **AI Agent → Configuration → Settings** (or *Settings → AI Agent*).
+Open **AI Agent → Configuration → Settings**. Go through the sections from top to bottom.
 
-### ① Connect an AI provider
+### Step ①: Connect your AI provider
 
-| Setting | What to do |
+1. **AI Provider:** choose OpenAI, Google Gemini, Anthropic Claude or OpenRouter.
+2. **API Key:** paste the key from the provider's website ([where to get it](#13-useful-links)). Only AI Agent administrators can see it.
+3. Click **Save**.
+4. Click **Refresh available models**. Odoo downloads the provider's current list of models.
+
+> 🔄 **The model list is empty after Refresh?** Refresh the browser page (**F5**), then open the **AI Model** list again. If it's still empty, check the key and the provider's billing page.
+
+### Step ②: Choose the AI model
+
+1. **AI Model:** pick the model everyone uses by default. A small, fast model is a good start ([see section 10](#10-choosing-a-model-and-keeping-costs-low)).
+2. Click **Save**.
+
+> 💡 Users can also switch model **in the chat itself**: use the model list at the **top right of the chat**. It shows the models of the provider you chose.
+
+### Step ③: Check MCP Server
+
+| Setting | What to check |
 |---|---|
-| **AI Provider** | Choose OpenAI, Google Gemini, Anthropic Claude or OpenRouter. |
-| **API Key** | Paste the key from the provider's website (links in [section 14](#14-useful-links)). Only AI Agent administrators can read it. |
-| **Refresh available models** | Click it after adding the key: Odoo loads the provider's current text models. |
-| **AI Model** | Pick the model everyone uses by default (see [section 11](#11-choosing-a-model-and-keeping-costs-low)). |
+| **MCP Server** | It must say it's on. If it says *"Switched off"*, click **Switch on**. |
+| **Enabled MCP models** | The kinds of records the AI may work with, and what it may do with each one (*Read, Create, Update, Delete, Buttons*). Click **Manage MCP models** to change the list. A record type that isn't in the list can't be used by anyone, not even administrators. |
 
-Click **Save**.
-
-### ② Check MCP Server
-
-| Setting | What it means |
-|---|---|
-| **MCP Server** | Must show as on. If it says *"Switched off: the AI cannot read data"*, click **Switch on**. |
-| **Enabled MCP models** | The kinds of records the AI may work with, and what it may do on each (*Read, Create, Update, Delete, Buttons*). Click **Manage MCP models** to add or remove them. A model that is not enabled cannot be used, not even by administrators. |
-
-### ③ Give users access
+### Step ④: Give people access
 
 Go to **Settings → Users**, open a user, and under **Access Rights → AI Agent** choose:
 
-| Access | Can do |
+| Access | They can |
 |---|---|
-| **User** | Chat with the AI and see their own usage. |
-| **Administrator** | Everything a User can, plus settings, providers, models and everyone's usage and cost. |
+| **User** | Chat with the AI, open Business Flow, see their own usage. |
+| **Administrator** | Everything above, plus the settings, everyone's usage and cost, and updating the business flow context. |
 
-> AI Agent users do **not** need the *MCP User* group. That group is only for connecting **outside** AI apps to Odoo's `/mcp` endpoint (see [section 9](#9-mcp-what-it-is-and-cautions)).
+> Users do **not** need the *MCP User* group. That group is only for connecting **outside** AI apps to Odoo ([section 8](#8-mcp-server-what-it-is-and-cautions)).
 
-### ④ Optional settings
+### Step ⑤: Optional settings
 
 | Setting | Default | What it does |
 |---|---|---|
-| **Share record values with the AI provider** | **Off** (recommended) | On: record values are also sent so the AI can summarise them in its own words. See [section 8](#8-privacy-exactly-what-is-sent-to-the-ai-provider). |
+| **Share record values with the AI provider** | **Off** ✅ recommended | When on, record values are also sent so the AI can summarise them in its own words. |
 | **Resolve errors with AI** | Off | Adds a **Resolve with AI** button to Odoo error messages. |
-| **Custom business-flow answers** | Off | Lets the AI answer from your own custom modules. Click **Index installed custom modules** after switching it on and after each custom-module update. |
-| **Tool steps per answer** | 8 | How many lookups the AI may chain for one answer (1–25). |
-| **Answer length** | 2,048 tokens | Maximum length of each AI reply (256–65,536). |
-| **Provider timeout** | 60 s | How long to wait for the AI provider (10–600). |
+| **Business flow context** | Off | Fills the **Business Flow** menu and lets the AI explain how *your* processes work ([see below](#-business-flow)). |
+| **Tool steps per answer** | 8 | How many lookups the AI may do for one answer (1–25). |
+| **Answer length** | 2,048 | The longest reply the AI may write, in tokens (256–65,536). |
+| **Provider timeout** | 60 seconds | How long to wait for the AI provider (10–600). |
+
+#### Switching on Business flow context
+
+1. Tick **Business flow context**.
+2. Read the short description under it. It tells you:
+   - **What it reads:** every installed app's documents, stages, buttons and access rights, plus the full code of your **own** custom modules, Studio changes and automation rules. Standard Odoo code and the Odoo documentation aren't copied, because the AI already knows them.
+   - **Tokens:** updating costs **nothing** (no AI is used). Each question about a flow sends a small amount of text, about 2,000 tokens.
+   - **Last updated:** when the context was last refreshed.
+3. Set **Update automatically every … days** (15 by default; 0 = only when you click the button).
+4. Click **Update context now**.
+
+> 💡 Click **Update context now** again after you deploy new or changed custom modules.
+
+<img src="static/description/screenshots/business_flow_settings.png" alt="Business flow context settings" width="900"/>
 
 ---
 
-## 5. Where users find it
+## 4. The menus, explained
 
-| Place | How |
+The **AI Agent** app on the Odoo home screen has these menus:
+
+```
+AI Agent
+├── 💬 (the chat)          ← opens when you click the app
+├── 🔀 Business Flow       ← every process in your Odoo, as a map
+├── 📈 Reporting
+│   └── Usage & Cost       ← requests, tokens and money spent
+└── ⚙️ Configuration
+    └── Settings           ← provider, key, model, privacy, business flow
+```
+
+### 💬 The chat
+
+Click the **AI Agent** app to open the full-page chat, with your past conversations on the left.
+
+You can also chat from anywhere:
+- the **AI Agent** icon in the **top bar** opens a small chat window on any screen;
+- the **AI Agent** tab in Discuss lists your AI conversations.
+
+At the **top right of the chat** you can change the **AI model** for that conversation.
+
+### 🔀 Business Flow
+
+A map of how work moves through your Odoo, built automatically from your own system. It's ready once an administrator has switched on **Business flow context** and clicked **Update context now**.
+
+The list shows each process (Sales, Purchase, Manufacturing, Inventory, Invoicing, Projects… plus your own custom ones). Open one to see:
+
+| Part | In simple words | Example |
+|---|---|---|
+| **Documents** | The journey, in order | Opportunity → Quotation → Delivery → Invoice → Payment |
+| **Stages** | Where a document is right now | Quotation → Quotation Sent → Sales Order → Cancelled |
+| **Actions** | The buttons that move it forward, when you can press them, and who may press them | **Confirm**: in Quotation or Quotation Sent, by Sales users |
+| **Custom rules** | Extra checks *your company* added in its own code | "A discount above 20% needs a sales manager's approval" |
+
+When a button depends on something other than the stage, it says so in plain words, for example *"Unlock: Any stage, when Locked"*.
+
+**Is this only for custom modules?** No. Standard Odoo apps appear too. Your custom modules **add** to the map: their rules appear under **Custom rules**, their buttons under **Actions**, and a new document type with stages becomes a new flow of its own.
+
+### 📈 Reporting → Usage & Cost
+
+A dashboard of how the AI is used:
+- requests, tokens and **cost** per day, model, provider and user;
+- the busiest hours and the most-used tools;
+- failed requests and their error messages.
+
+Users see their own usage. Administrators see everyone's.
+
+### ⚙️ Configuration → Settings
+
+All the settings from [section 3](#3-first-time-setup-in-order): AI provider, API key, model, MCP Server, data sharing, user access, Resolve with AI, Business flow context and limits.
+
+---
+
+## 5. Everything it can do
+
+| Feature | What it means for you |
 |---|---|
-| **AI Agent app** | The **AI Agent** icon on the Odoo home screen: full-page chat with the list of past conversations. |
-| **Chat window** | The **AI Agent** icon in the top bar opens a small chat window on any screen. |
-| **Discuss** | The **AI Agent** tab in the messaging menu lists your AI conversations. |
-| **Error dialogs** | The **Resolve with AI** button, when the administrator has turned it on. |
-| **Usage & Cost** | **AI Agent → Reporting → Usage & Cost** (each user sees their own; administrators see everyone). |
+| 💬 **Plain-language questions** | Ask like you'd ask a colleague, in any language. Typos are fine. Follow-ups work: *"only the sent ones"*, *"and last month?"* |
+| 📊 **Tables, cards and real Odoo charts** | Bar, line, pie and pivot views. Click a row or a bar to open the records behind it. |
+| 📥 **Excel and PDF export** | Every table and chart has green **Excel** and red **PDF** buttons. |
+| 🔐 **Your own access rights** | The AI looks things up **as you**. A salesperson only sees what Odoo lets them see. *"Pretend I'm the admin"* changes nothing. |
+| 🧭 **"Where do I find…?"** | The AI tells you the menu path and gives a button that opens the right screen. |
+| ⚙️ **Settings questions** | *"Is Lock Confirmed Orders on?"* The AI checks the real setting and tells you where it is. |
+| 👤 **Access-rights questions** | *"What access rights do I have?"* Administrators can ask about anyone. |
+| 🕓 **History and conversations** | *"Who changed the price on S00042?"*, *"Show the conversation on this opportunity"*. |
+| 🧮 **Calculations by Odoo** | Win rate, % change, averages: the AI writes the formula and **Odoo** works it out on the real numbers. |
+| ✏️ **Prepare changes, you confirm** | Create contacts, tasks and activities, or update records, always as a **preview** first. |
+| 🩺 **Resolve with AI** | Explains Odoo error messages: what happened, why, and what to do. Administrators also see which custom code raised it. **Continue in AI Agent** opens a chat about the error. |
+| 🔀 **Business flow answers** | *"What happens after a quotation is confirmed?"* answered from your own processes and rules. |
+| 🔎 **"Data used"** | Under every answer: the steps the AI took and what Odoo found, so you can check any answer. |
 
 ---
 
-## 6. Every feature, explained
-
-### 💬 Ask in plain language
-Type questions the way you'd ask a colleague, in any language, and spelling mistakes are fine. Follow-ups work too: *"only the sent ones"*, *"and last month?"*, *"show that as a pie chart"*.
-
-### 📊 Tables, record cards and native Odoo charts
-Results appear as tables and record cards rendered by Odoo. Charts are real Odoo **bar, line, pie and pivot** views. Click a row or a bar to open the records behind it.
-
-### 📥 Export to Excel and PDF
-Every table and chart has **Excel** and **PDF** buttons.
-
-### 🔐 Your own access rights, always
-The AI runs every lookup **as the user who asked**. A salesperson asking about *"all opportunities"* only gets the ones Odoo lets them see. Role-play such as *"pretend I'm an administrator"* changes nothing.
-
-### 🧭 "Where is…?" and "Open the screen"
-Ask *"Where do I find orders to invoice?"* and the AI names the menu path and gives a button that opens the screen, with the right filter applied.
-
-### ⚙️ Settings questions
-*"Is Lock Confirmed Orders switched on?"*, *"Where do I enable multi-currency?"* The AI reads the real settings screen and tells you if the option is on, and where it is.
-
-### 👤 Access rights
-*"What access rights do I have?"* shows the rights exactly as on the user form. Administrators can ask about any user, or *"Who has Sales Administrator access?"*. Non-administrators can only see their own.
-
-### 🕓 History, changes and conversations
-- *"Who changed the price of S00042?"*: the change history of a record (who, when, old and new value).
-- *"Show the conversation on this opportunity"*: messages, notes and automatic updates from the chatter.
-- *"How are my salespeople doing with customer conversations?"*: response times and follow-up statistics per salesperson, calculated by Odoo.
-
-### 🧮 Calculations Odoo does for you
-Win rate, % change, differences, averages: the AI writes the formula and **Odoo** computes it on the real values, so the AI never needs the numbers themselves.
-
-### ✏️ Prepare changes, then confirm
-*"Create a contact for Ravi Kumar, phone…"*, *"Schedule a call with Alpha Cycles tomorrow"*. The AI prepares a **preview card** showing exactly what will change. Nothing happens until you click **Confirm**. See [section 10](#10-always-review-changes-before-you-confirm).
-
-### 🩺 Resolve with AI (error help)
-When Odoo shows an error (*"The discount above 20% needs approval"*), the user can click **Resolve with AI**:
-- **Normal users** get plain words: *what happened, why, and what to do next*.
-- **Administrators** also get the technical details: the custom module, file and rule that raised it.
-- **Continue in AI Agent** opens a chat about the error, to ask follow-up questions.
-
-### 🏗️ Custom business-flow answers
-With **Custom business-flow answers** on and your custom modules indexed, the AI can answer *"What happens when a purchase order is above 10,000?"* from **your own** custom code, Studio views and automation rules. Standard Odoo modules are not indexed.
-
-### 📈 Usage and cost dashboard
-**AI Agent → Reporting → Usage & Cost** shows requests, tokens and cost per day, model, provider and user, plus busiest hours and most-used tools.
-
-### 🔎 "Data used": check how an answer was made
-Under each answer, **Data used** lists the steps the AI took and the results Odoo produced, so anyone can check where an answer came from.
-
----
-
-## 7. Questions to try
+## 6. Questions to try
 
 | Area | Try asking… |
 |---|---|
-| Sales | *"How many sales orders were confirmed this month and what is the total?"* · *"Compare confirmed sales this month with last month"* |
-| CRM | *"Which opportunities are expected to close this month?"* · *"What is our win rate this quarter?"* · *"Which leads have overdue activities?"* |
-| Invoicing | *"Which customer invoices are overdue?"* · *"How much payment did we receive this month?"* |
-| Purchase | *"Total purchase amount by vendor this month"* · *"Which purchase orders are waiting for vendor bills?"* |
-| Inventory | *"How much stock of Mountain Bike MB-200 do we have?"* · *"What was scrapped this month?"* |
-| Employees | *"Show a bar chart of employees by department"* · *"Who joined this month?"* |
-| Users | *"Which users have Settings / Administration access?"* · *"What access rights do I have?"* |
-| Settings | *"Is Lock Confirmed Orders enabled?"* · *"Where do I turn on multi-currency?"* |
-| History | *"Who changed the price on S00042?"* · *"Show the conversation on this opportunity"* |
-| Charts | *"Pie chart of this month's sales by product"* · *"Line chart of invoices per month this year"* |
-| Help | *"How do I convert a lead into an opportunity?"* · *"Where do I find orders to invoice?"* |
+| **Sales** | *"How many sales orders were confirmed this month, and what's the total?"* · *"Compare this month's sales with last month"* |
+| **CRM** | *"Which opportunities should close this month?"* · *"What's our win rate this quarter?"* |
+| **Invoicing** | *"Which customer invoices are overdue?"* · *"How much did we receive this month?"* |
+| **Purchase** | *"Total purchases by vendor this month"* · *"Which purchase orders are waiting for a vendor bill?"* |
+| **Inventory** | *"How much stock of Mountain Bike MB-200 do we have?"* · *"What was scrapped this month?"* |
+| **Employees** | *"Bar chart of employees by department"* · *"Who joined this month?"* |
+| **Business flow** | *"What are the steps of our sales process from lead to payment?"* · *"Who can validate a receipt?"* · *"Are there special rules before confirming a sales order?"* |
+| **Settings** | *"Is Lock Confirmed Orders enabled?"* · *"Where do I turn on multi-currency?"* |
+| **History** | *"Who changed the price on S00042?"* · *"Show the conversation on this opportunity"* |
+| **Help** | *"How do I convert a lead into an opportunity?"* · *"Where do I find orders to invoice?"* |
 
 ---
 
-## 8. Privacy: exactly what is sent to the AI provider
+## 7. Privacy: exactly what is sent
 
-| Sent to the AI provider | Data sharing **off** (default) | Data sharing **on** |
+| What | Data sharing **off** (default) | Data sharing **on** |
 |---|---|---|
-| The user's questions | ✅ | ✅ |
-| Tool list and field definitions (*"an invoice has a due date"*) | ✅ | ✅ |
-| Number of records found and their IDs | ✅ | ✅ |
-| **Record values** (names, amounts, emails, notes…) | ❌ **Never** | ✅ |
-| Passwords, API keys, tokens | ❌ Never | ❌ Never |
-| Error help (only when a user clicks **Resolve with AI**) | Error message, model, action and the related custom code. Values only if sharing is on. | ✅ Also record values |
-| Business-flow answers (when switched on) | Relevant excerpts of **your custom module code** | ✅ |
+| Your question | ✅ sent | ✅ sent |
+| Tool list and field names | ✅ sent | ✅ sent |
+| Number of records found, and their IDs | ✅ sent | ✅ sent |
+| **Record values** (names, amounts, emails, notes…) | ❌ **never** | ✅ sent |
+| Passwords, API keys, tokens | ❌ never | ❌ never |
+| **Resolve with AI** (only when a user clicks it) | The error message and the related custom code | Also the record's values |
+| **Business flow** questions (when switched on) | Small excerpts of your custom code and flow steps | Same |
+| **Building** the Business Flow menu | ❌ nothing (no AI is used) | ❌ nothing |
 
-> ⚠️ **Questions are always sent.** If a user *types* personal data into a question (*"customer Jane Smith, phone 555…"*), that text goes to the AI provider. Tell users to ask by reference or name only.
+> ⚠️ **What you type is sent.** If you type personal details into a question (*"Jane Smith, phone 555…"*), that text goes to the AI provider. Ask by name or reference instead.
 
-> ⚠️ Your AI provider's own data policy applies to what is sent. Use business or API accounts that don't train on your data, and check the provider's terms.
+> ⚠️ Your AI provider's own terms apply to what is sent. Use a business or API account that doesn't train on your data.
 
 ---
 
-## 9. MCP: what it is, and cautions
+## 8. MCP Server: what it is, and cautions
 
-**MCP (Model Context Protocol)** is a standard way for AI to use tools. The **MCP Server** module gives Odoo a set of safe tools (*search records, read a record, total by group, create a record…*) and **checks every call against the user's access rights**. AI Agent runs these tools **inside Odoo**: no extra server or process.
+**MCP (Model Context Protocol)** is a standard way for an AI to use tools. The **MCP Server** module gives Odoo a set of safe tools (*search records, read a record, total by group, create a record…*) and **checks every call against the user's access rights**. AI Agent runs these tools **inside Odoo**, with no extra server to install.
 
 ### Cautions
 
-- 🔑 **Enable only the models you need.** In *Manage MCP models*, every enabled model is a model the AI can work with. Leave sensitive models (payroll, salaries, private HR data) **off** unless you really need them.
-- ✍️ **Give write rights sparingly.** *Create, Update, Delete* and *Buttons* on a model let the AI **prepare** those changes. Prefer **Read only**. Turn on *Delete* only if you really need it.
-- 🌐 **The external `/mcp` endpoint is a separate door.** MCP Server can also let **outside** AI apps (Claude Desktop, ChatGPT…) connect to Odoo. That needs the **MCP User** group and an API key or login. Give the *MCP User* group only to people who need it, use **"MCP only"** API keys, and remove keys that are no longer used.
-- 📜 **Check the MCP Logs.** MCP Server keeps an audit log of tool calls (its **MCP Logs** menu); review it now and then.
-- 👥 **Access rights are the real protection.** The AI can never see more than the user, so keep Odoo user rights and record rules tidy.
+- 🔑 **Enable only what you need.** In **Manage MCP models**, every enabled record type is one the AI can work with. Keep sensitive ones (payroll, salaries, private HR data) **off**.
+- ✍️ **Give write rights sparingly.** *Create, Update, Delete* and *Buttons* let the AI **prepare** those changes. Prefer **Read** only, and switch on *Delete* only if you really need it.
+- 🌐 **The `/mcp` address is a separate door.** MCP Server can also let **outside** AI apps (Claude Desktop, ChatGPT…) connect to Odoo. That needs the **MCP User** group and an API key. Give that group only to people who need it, and delete old keys.
+- 📜 **Look at the MCP Logs now and then.** MCP Server records every tool call in its **MCP Logs** menu.
+- 👥 **Access rights are the real protection.** The AI never sees more than the user, so keep user rights and record rules tidy.
 
 ---
 
-## 10. Always review changes before you confirm
+## 9. Always check before you click Confirm
 
-AI can misunderstand. That's why **every change is a preview first**:
+AI can misunderstand, so **every change is a preview first**. Before you click **Confirm**:
 
-```
- ┌─────────────────────────────────────────────┐
- │  Create Contact                             │
- │  Name:   Ravi Kumar                         │
- │  Phone:  +91 98765 43210                    │
- │  Company: Alpha Cycles                      │
- │                                             │
- │              [ Cancel ]   [ Confirm ]       │
- └─────────────────────────────────────────────┘
-```
+1. ✅ **Right record?** Check the name, number and company. *"Ravi"* can match several people.
+2. ✅ **Right values?** Dates, amounts, quantities, and who it's assigned to.
+3. ✅ **Right action?** *Update* or *create new*, and which button will be pressed.
+4. ✅ **Not sure? Click Cancel** and ask again more precisely.
 
-Before you click **Confirm**:
-
-1. ✅ **Is it the right record?** Check the name, number and company. *"Ravi"* can match several people.
-2. ✅ **Are the values right?** Dates, amounts, quantities and the person it's assigned to.
-3. ✅ **Is it the right action?** *Update* versus *create new*, and which button will be pressed.
-4. ✅ **When in doubt, Cancel** and ask again more precisely.
-
-> The change runs with **your** access rights, and Odoo's own rules still apply. Still, **you are responsible for what you confirm**: the AI only prepares it.
+> The change runs with **your** access rights, and Odoo's own rules still apply. But **you** are responsible for what you confirm: the AI only prepares it.
 
 ---
 
-## 11. Choosing a model and keeping costs low
+## 10. Choosing a model and keeping costs low
 
-| Provider | Good everyday choice | For harder questions |
+| Provider | Everyday choice | For harder questions |
 |---|---|---|
 | Anthropic Claude | Claude Haiku | Claude Sonnet |
 | OpenAI | A "mini" model | The standard model |
 | Google Gemini | A "Flash" or "Flash Lite" model | A "Pro" model |
-| OpenRouter | Any of the above, through one key | |
+| OpenRouter | Any of the above, with one key | |
 
-Tips:
-- Start with a **small, fast model**. Because AI Agent sends counts and IDs instead of records, answers stay short and cheap. A typical question costs a fraction of a cent.
-- Users can pick another model of the **same provider** for a conversation.
-- Watch **Usage & Cost** weekly. Lower **Tool steps per answer** or **Answer length** if costs grow.
-- Set a **monthly budget limit** in your provider's console as a safety net.
+- **Start small.** Because AI Agent sends counts and IDs instead of your records, a typical question costs a fraction of a cent.
+- **New models come out often.** Click **Refresh available models** in Settings to see them.
+- **Watch Reporting → Usage & Cost** once a week.
+- **Set a monthly budget** in your AI provider's console, as a safety net.
 
 ---
 
-## 12. Updating to a new version
+## 11. Updating to a new version
 
 **1. Stop Odoo** with **Ctrl + C** in its window.
 
-**2. Get the new code, upgrade the module and start Odoo again.** Replace `YOUR_DATABASE` with your database name:
+**2. Download the new version, upgrade the module, and start Odoo again.** Replace `YOUR_DATABASE` with your database name:
 
 ```
 C:\Users\YourName>cd..
@@ -447,62 +512,63 @@ C:\Odoo>venv\Scripts\activate
 | Command | What it does |
 |---|---|
 | `git pull origin main` | Downloads the new version of AI Agent |
-| `... -u odoo_ai_agent --stop-after-init` | Upgrades AI Agent in your database, then stops by itself |
+| `python odoo-bin … -u odoo_ai_agent --stop-after-init` | **Upgrades** AI Agent in your database, then stops by itself |
 | `python odoo-bin -c C:\Odoo\odoo.conf` | Starts Odoo normally again |
 
-**3.** Refresh the browser with **Ctrl + Shift + R**.
+**3.** In the browser, press **Ctrl + Shift + R** to reload.
 
-> 💡 Instead of the `-u odoo_ai_agent` command, you can start Odoo normally and click **Apps** → search **AI Agent** → **⋮** → **Upgrade**.
+**4.** If you use Business flow context, click **Update context now** in Settings.
 
-On Linux: `git pull origin main` in the module folder, restart Odoo, then **Upgrade** in Apps.
-
-> 💡 If you use **Custom business-flow answers**, click **Index installed custom modules** again after you update your custom modules.
+> 💡 Instead of the `-u odoo_ai_agent` line, you can start Odoo normally and go to **Apps** → search **AI Agent** → **⋮** → **Upgrade**.
 
 ---
 
-## 13. Debugging and troubleshooting
+## 12. Debugging and troubleshooting
 
 ### Common problems
 
 | Problem | Fix |
 |---|---|
-| **AI Agent isn't in Apps** | Check `addons_path` in the config file, restart Odoo, then **Apps → Update Apps List**, and remove the *Apps* filter when searching. |
-| **"MCP Server" missing when installing** | Put the `mcp_server` folder next to `odoo_ai_agent` (same `C:\Odoo\custom-addons` folder, no folder-inside-a-folder) and update the apps list. |
-| **Installation error about a Python module** | Run `C:\Odoo\venv\Scripts\activate` first, then `pip install` (Step 5). Packages installed into another Python on your PC don't help Odoo. |
-| **`python` is not recognized, or the wrong Python runs** | Run `C:\Odoo\venv\Scripts\activate` first: the prompt then starts with `(venv)`. |
-| **`git` is not recognized** | Install Git for Windows, then open a **new** Command Prompt. |
-| **Odoo stops right after starting** | Usually a typo in `odoo.conf` (check the commas in `addons_path`). The exact error is shown in the Odoo window. |
-| **"Address already in use" (port 8069)** | Odoo is already running in another window. Stop it there (Ctrl + C) and start again. |
-| **"No AI model is selected"** | Settings → choose a provider, paste the key, **Refresh available models**, choose a model, **Save**. |
-| **"Invalid API key" / "401"** | The key is wrong, expired, or belongs to another provider. Create a new one in the provider's console. |
-| **"Quota exceeded" / "429" / "insufficient credit"** | Add credit or raise the limit in the provider's billing page, or wait a minute and retry. |
-| **"Odoo could not reach the provider"** | No internet access, or a firewall, antivirus or proxy blocks Odoo. In Command Prompt, try `curl https://api.openai.com` (or your provider's address). |
-| **Answer is slow or times out** | Raise **Provider timeout**, pick a faster model, or ask a narrower question. |
-| **"Not enabled for the AI"** | The model isn't in **Manage MCP models**, or the operation (create/update…) isn't ticked for it. |
-| **"You don't have access to…"** | Working as intended: the user's Odoo rights don't allow it. Change the user's access rights if they should. |
-| **The user can't see AI Agent** | Give them **Access Rights → AI Agent → User**. |
-| **No "Resolve with AI" button on errors** | Switch on **Resolve errors with AI** in the settings, and refresh the browser. |
-| **Changes in the code don't show** | Stop Odoo (Ctrl + C), upgrade the module and start it again (section 12), then hard-refresh the browser (Ctrl + Shift + R). |
-| **The answer looks wrong** | Check the table or chart under the answer (that's Odoo's real data) and **Data used**; ask again more precisely, or try a stronger model. |
+| **AI Agent isn't in Apps** | Check `addons_path` in `odoo.conf`, restart Odoo, then **Apps → Update Apps List**. Remove the *Apps* filter when you search. |
+| **"MCP Server" is missing when installing** | Put the `mcp_server` folder next to `odoo_ai_agent` (no folder inside a folder), then **Update Apps List**. |
+| **Error about a missing Python module** | Run `venv\Scripts\activate` first, then the `pip install` line from Step 4. |
+| **`python` or `git` is not recognized** | For `python`: run `venv\Scripts\activate` first. For `git`: install Git, then open a **new** Command Prompt. |
+| **Odoo stops right after starting** | Usually a typo in `odoo.conf` (check the commas in `addons_path`). The error is shown in the Odoo window. |
+| **"Address already in use" (port 8069)** | Odoo is already running in another window. Stop it there with Ctrl + C. |
+| **No AI models after "Refresh available models"** | Refresh the browser page (**F5**). Still empty? The key is wrong or the account has no credit. |
+| **"No AI model is selected"** | Settings → provider → key → **Save** → **Refresh available models** → choose a model → **Save**. |
+| **"Invalid API key" / "401"** | The key is wrong, expired, or from another provider. Create a new one. |
+| **"Quota exceeded" / "429" / "insufficient credit"** | Add credit on the provider's billing page, or wait a minute and try again. |
+| **"Odoo could not reach the provider"** | No internet, or a firewall, antivirus or proxy is blocking Odoo. |
+| **"The MCP Server is switched off"** | Settings → MCP Server → **Switch on**. |
+| **"Not enabled for the AI"** | That record type isn't in **Manage MCP models**, or that action (create, update…) isn't ticked. |
+| **"You don't have access to…"** | Working as intended: your Odoo rights don't allow it. |
+| **A user can't see AI Agent** | Give them **Access Rights → AI Agent → User**. |
+| **No "Resolve with AI" button** | Switch on **Resolve errors with AI**, then refresh the browser. |
+| **Business Flow is empty** | Switch on **Business flow context** and click **Update context now**. |
+| **Business Flow doesn't show my new custom module** | Click **Update context now** after deploying it. |
+| **Answers are slow or time out** | Raise **Provider timeout**, choose a faster model, or ask a narrower question. |
+| **An answer looks wrong** | Check the table under the answer (that's Odoo's real data) and **Data used**. Ask again more precisely, or try a stronger model. |
+| **Code changes don't show** | Stop Odoo, run the upgrade line from [section 11](#11-updating-to-a-new-version), start Odoo, and press Ctrl + Shift + R. |
 
 ### Where to look
 
-- **The Odoo window:** Odoo started with `python odoo-bin -c C:\Odoo\odoo.conf` shows its log in that window. Problems appear as `ERROR` lines, with the details below them.
-- **Log to a file instead:** set `logfile = C:\Odoo\odoo.log` in `odoo.conf` and restart Odoo. Then follow only the AI Agent lines in **PowerShell**:
+- **The Odoo window.** Odoo prints its log in the Command Prompt window where you started it. Problems show as `ERROR` lines.
+- **Save the log to a file.** Add `logfile = C:\Odoo\odoo.log` to `odoo.conf` and restart Odoo. To follow only the AI Agent lines, use **PowerShell**:
   ```powershell
   Get-Content C:\Odoo\odoo.log -Wait -Tail 50 | Select-String "AI Agent"
   ```
-- **"Data used" under an answer** shows each step the AI took and the results Odoo produced: the first place to look when an answer seems wrong.
-- **More detail in the log:** start Odoo with this extra option to see every step, including ones that were skipped on purpose:
-  ```bat
-  python odoo-bin -c C:\Odoo\odoo.conf --log-handler=odoo.addons.odoo_ai_agent:DEBUG
+- **See every step in detail.** Start Odoo with this extra option:
   ```
-- **Usage & Cost** shows failed requests and their error messages per user and model.
-- **MCP Server logs** (in its menu) list every tool call with its result, user and time.
+  (venv) C:\Odoo\odoo>python odoo-bin -c C:\Odoo\odoo.conf --log-handler=odoo.addons.odoo_ai_agent:DEBUG
+  ```
+- **"Data used"** under an answer shows each step and what Odoo found.
+- **Reporting → Usage & Cost** lists failed requests with their error messages.
+- **MCP Logs** (in the MCP Server menu) lists every tool call with its result, user and time.
 
 ---
 
-## 14. Useful links
+## 13. Useful links
 
 | What | Link |
 |---|---|
@@ -517,6 +583,7 @@ On Linux: `git pull origin main` in the module folder, restart Odoo, then **Upgr
 | OpenRouter models and prices | https://openrouter.ai/models |
 | Model Context Protocol (MCP) | https://modelcontextprotocol.io |
 | Odoo 19 documentation | https://www.odoo.com/documentation/19.0/ |
+| Git for Windows | https://git-scm.com/download/win |
 
 ---
 
@@ -524,6 +591,6 @@ On Linux: `git pull origin main` in the module folder, restart Odoo, then **Upgr
 
 **AI Agent for Odoo 19** · LGPL-3
 
-*Ask freely, let Odoo answer, and always review before you confirm.*
+*The AI plans. Odoo answers. Your data stays home.*
 
 </div>
