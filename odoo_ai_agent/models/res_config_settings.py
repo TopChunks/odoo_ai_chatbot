@@ -3,7 +3,7 @@ from odoo.exceptions import UserError
 
 from odoo.addons.mcp_server.controllers import utils as mcp_utils
 
-from .ai_agent_flow import MAX_EXCERPTS
+from .ai_agent_flow import MAX_EXCERPTS, REFRESH_DAYS_PARAM, refresh_days
 
 
 class ResConfigSettings(models.TransientModel):
@@ -56,9 +56,10 @@ class ResConfigSettings(models.TransientModel):
     ai_agent_flow_indexed_at = fields.Datetime(compute="_compute_ai_agent_flow_status")  # shown in the user's time zone
     ai_agent_flow_count = fields.Integer(compute="_compute_ai_agent_flow_status")
     ai_agent_flow_question_tokens = fields.Integer(compute="_compute_ai_agent_flow_status")
+    # Saved in get_values/set_values, not with config_parameter: Odoo deletes an integer parameter saved as 0.
     ai_agent_flow_refresh_days = fields.Integer(
-        string="Update the context every (days)", config_parameter="odoo_ai_agent.business_flow_refresh_days",
-        default=15, help="The context is updated automatically after this many days (0 = only with the button).",
+        string="Update the context every (days)",
+        help="The context is updated automatically after this many days (0 = only with the button).",
     )
 
     @api.depends("company_id")
@@ -91,6 +92,12 @@ class ResConfigSettings(models.TransientModel):
         self.env["ai_agent.flow.index"].action_rebuild()
         return {"type": "ir.actions.client", "tag": "reload"}
 
+    @api.model
+    def get_values(self):
+        values = super().get_values()
+        values["ai_agent_flow_refresh_days"] = refresh_days(self.env)
+        return values
+
     @api.onchange("ai_agent_provider_id")
     def _onchange_ai_agent_provider_id(self):
         if self.ai_agent_model_id.provider_id != self.ai_agent_provider_id:
@@ -108,6 +115,7 @@ class ResConfigSettings(models.TransientModel):
                 raise UserError(_("The context update interval must be between 0 and 365 days."))
         result = super().set_values()
         for settings in self:
+            self.env["ir.config_parameter"].sudo().set_param(REFRESH_DAYS_PARAM, str(settings.ai_agent_flow_refresh_days))
             if not settings.ai_agent_business_flow_enabled:
                 self.env["ai_agent.flow.index"].sudo().search([]).unlink()
                 self.env["ai_agent.business.flow"].sudo().search([]).unlink()

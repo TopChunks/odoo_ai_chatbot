@@ -39,6 +39,8 @@ SKIP_DIRS = {"__pycache__", ".git", ".hg", ".svn", "node_modules", "tests", "tes
              "static/lib", "lib"}
 # The AI Agent and the MCP server are tools, not this instance's business flow.
 SELF_MODULES = {"odoo_ai_agent", "mcp_server"}
+REFRESH_DAYS_PARAM = "odoo_ai_agent.business_flow_refresh_days"
+DEFAULT_REFRESH_DAYS = 15
 MAX_INDEX_CHUNKS = 8000
 SMALL_MODULE_METHODS = 6  # a model with this many custom methods or fewer is shown whole
 MAX_EXCERPTS = 10  # excerpts sent to the AI for one question
@@ -198,6 +200,16 @@ def xml_chunks(text, relative):
     return chunks
 
 
+def refresh_days(env):
+    """Days between automatic context updates (0 = only with the button). Stored as text by the settings,
+    because Odoo deletes an integer setting saved as 0; missing means the default."""
+    value = env["ir.config_parameter"].sudo().get_param(REFRESH_DAYS_PARAM)
+    try:
+        return int(value) if value not in (None, False, "") else DEFAULT_REFRESH_DAYS
+    except ValueError:
+        return DEFAULT_REFRESH_DAYS
+
+
 def window_chunks(text, relative):
     lines = text.splitlines()
     out = []
@@ -304,7 +316,7 @@ class AiAgentFlowIndex(models.Model):
     def _cron_refresh(self):
         """Scheduled update: rebuild when the context is older than the days set in Settings (0 = never)."""
         params = self.env["ir.config_parameter"].sudo()
-        days = int(params.get_param("odoo_ai_agent.business_flow_refresh_days") or 0)
+        days = refresh_days(self.env)
         if days <= 0 or params.get_param("odoo_ai_agent.business_flow_enabled") not in ("True", "1", "true"):
             return
         last = fields.Datetime.to_datetime(params.get_param("odoo_ai_agent.business_flow_indexed_at") or False)

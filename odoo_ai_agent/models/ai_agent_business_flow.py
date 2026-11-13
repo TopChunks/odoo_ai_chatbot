@@ -8,26 +8,32 @@ so chat questions such as "what happens after the quotation?" find it.
 
 import ast
 import json
+import logging
 
 from markupsafe import Markup
 
 from odoo import _, api, fields, models
 
-# (flow, its documents in order). A document is (model, what users call it); missing apps are skipped.
+_logger = logging.getLogger(__name__)
+
+# (flow, the document of its own app, its documents in order). A document is (model, what users call it).
+# A flow is shown only when its own app is installed (no "Purchase" flow made of invoices alone); other
+# documents of the chain are skipped when their app is missing (Sales without CRM starts at the quotation).
 STANDARD_FLOWS = [
-    ("Sales", [("crm.lead", "Opportunity"), ("sale.order", "Quotation / Sales Order"),
-               ("stock.picking", "Delivery"), ("account.move", "Customer Invoice"),
-               ("account.payment", "Customer Payment")]),
-    ("Purchase", [("purchase.order", "Request for Quotation / Purchase Order"), ("stock.picking", "Receipt"),
-                  ("account.move", "Vendor Bill"), ("account.payment", "Vendor Payment")]),
-    ("Manufacturing", [("mrp.production", "Manufacturing Order")]),
-    ("Inventory", [("stock.picking", "Transfer")]),
-    ("Invoicing", [("account.move", "Invoice / Bill"), ("account.payment", "Payment")]),
-    ("Projects", [("project.task", "Task")]),
-    ("Helpdesk", [("helpdesk.ticket", "Ticket")]),
-    ("Repairs", [("repair.order", "Repair Order")]),
-    ("Time Off", [("hr.leave", "Time Off Request")]),
-    ("Expenses", [("hr.expense", "Expense")]),
+    ("Sales", "sale.order", [("crm.lead", "Opportunity"), ("sale.order", "Quotation / Sales Order"),
+                             ("stock.picking", "Delivery"), ("account.move", "Customer Invoice"),
+                             ("account.payment", "Customer Payment")]),
+    ("Purchase", "purchase.order", [("purchase.order", "Request for Quotation / Purchase Order"),
+                                    ("stock.picking", "Receipt"), ("account.move", "Vendor Bill"),
+                                    ("account.payment", "Vendor Payment")]),
+    ("Manufacturing", "mrp.production", [("mrp.production", "Manufacturing Order")]),
+    ("Inventory", "stock.picking", [("stock.picking", "Transfer")]),
+    ("Invoicing", "account.move", [("account.move", "Invoice / Bill"), ("account.payment", "Payment")]),
+    ("Projects", "project.task", [("project.task", "Task")]),
+    ("Helpdesk", "helpdesk.ticket", [("helpdesk.ticket", "Ticket")]),
+    ("Repairs", "repair.order", [("repair.order", "Repair Order")]),
+    ("Time Off", "hr.leave", [("hr.leave", "Time Off Request")]),
+    ("Expenses", "hr.expense", [("hr.expense", "Expense")]),
 ]
 SKIP_ACTIONS = {"Print", "Preview"}  # on every document, not a step of the flow
 MAX_STAGES = 12
@@ -292,8 +298,8 @@ class AiAgentBusinessFlow(models.Model):
     @api.model
     def _flow_definitions(self, custom_module_names):
         flows = [(name, [(model, label) for model, label in steps if model in self.env])
-                 for name, steps in STANDARD_FLOWS]
-        known = {model for _name, steps in STANDARD_FLOWS for model, _label in steps}
+                 for name, own_model, steps in STANDARD_FLOWS if own_model in self.env]
+        known = {model for _name, _own, steps in STANDARD_FLOWS for model, _label in steps}
         # Document types this instance's own modules add, when they have stages.
         for record in self.env["ir.model"].sudo().search([("transient", "=", False)]):
             if record.model in known or record.model not in self.env:
@@ -334,24 +340,32 @@ class AiAgentBusinessFlow(models.Model):
         self.sudo().search([]).unlink()
         chunks = []
         for sequence, (name, documents) in enumerate(self._flow_definitions(custom_module_names)):
-            steps, text = [], [_("Business flow: %(name)s. Documents in order: %(chain)s.", name=name,
-                                 chain=" -> ".join(label for _model, label in documents))]
+            steps, read = [], []
             for model, label in documents:
-                stages, by_state = self._stages(model)
-                actions = self._actions(model, stages, by_state)
-                rules = self._custom_rules(model)
-                steps.append((label, stages, actions, rules))
+                # One document whose form another module broke must not stop the update (nor the daily job).
+                try:
+                    with self.env.cr.savepoint():
+                        stages, by_state = self._stages(model)
+                        steps.append((label, stages, self._actions(model, stages, by_state), self._custom_rules(model)))
+                        read.append(model)
+                except Exception:
+                    _logger.warning("Business Flow: %s (%s) skipped, it could not be read.", label, model, exc_info=True)
+            if not steps:
+                continue
+            text = [_("Business flow: %(name)s. Documents in order: %(chain)s.", name=name,
+                      chain=" -> ".join(step[0] for step in steps))]
+            for label, stages, actions, rules in steps:
                 text.append(_("%(doc)s stages: %(stages)s.", doc=label,
                               stages=" -> ".join(stage for _key, stage in stages) or "-"))
                 text += [_("%(doc)s action %(action)s%(when)s, done by %(who)s.", doc=label, action=action,
                            when=_(" (stage: %s)", when) if when else "", who=who) for action, when, who in actions]
                 text += [f"{label}: {rule}" for rule in rules]
             self.sudo().create({
-                "name": name, "sequence": sequence, "documents": " → ".join(label for _model, label in documents),
+                "name": name, "sequence": sequence, "documents": " → ".join(step[0] for step in steps),
                 "stage_count": sum(len(step[1]) for step in steps), "action_count": sum(len(step[2]) for step in steps),
                 "rule_count": sum(len(step[3]) for step in steps), "diagram": self._diagram(steps),
             })
             chunks.append({"module_name": "business flow", "source_path": _("Business Flow: %s", name),
-                           "line_start": 1, "kind": "flow", "model_name": documents[0][0], "symbol": name,
+                           "line_start": 1, "kind": "flow", "model_name": read[0], "symbol": name,
                            "content": "\n".join(text)[:3000]})
         return chunks
