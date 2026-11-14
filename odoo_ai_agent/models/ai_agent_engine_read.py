@@ -132,7 +132,7 @@ class AiAgentEngineRead(models.AbstractModel):
         listed = lambda key: [arguments[key]] if isinstance(arguments.get(key), str) else list(arguments.get(key) or [])  # noqa: E731
         names = self._requested_fields({"groupby": listed("groupby"), "domain": self._domain(arguments),
                                         "order": arguments.get("order")})
-        names += [str(a).split(":")[0] for a in listed("aggregates")]
+        names += [str(a).split(":")[0] for a in listed("aggregates") + listed("measure")]  # measure: show_chart
         for name in dict.fromkeys(names):
             field = Model._fields.get(name)
             if field is not None and not Model._has_field_access(field, "read"):
@@ -141,6 +141,37 @@ class AiAgentEngineRead(models.AbstractModel):
                          "%(model)s records without it: say that this field is restricted, not that the records are "
                          "hidden.", field=field.string, name=name, model=self._model_label(model))
         return None
+
+    @api.model
+    def _other_users_hidden(self, model, arguments, state):
+        """A normal user filtered on another user ("Daniel's opportunities") and found nothing. Record rules hide other
+        people's records, so that says nothing about them: tell the user neutrally (the same whether or not any exist)
+        and keep the AI from saying the other person has none."""
+        if self._is_admin() or not isinstance(model, str) or model not in self.env:
+            return ""
+        Users, names = self.env["res.users"].sudo(), []  # user names are the directory everyone sees
+        for term in self._domain(arguments):
+            if not (isinstance(term, (list, tuple)) and len(term) == 3 and isinstance(term[0], str)):
+                continue
+            path, value = term[0].split("."), term[2]
+            field = self.env[model]._fields.get(path[0])
+            if field is None or field.type != "many2one" or field.comodel_name != "res.users":
+                continue
+            if len(path) == 1:
+                ids = [i for i in (value if isinstance(value, (list, tuple)) else [value]) if isinstance(i, int)]
+                users = Users.browse([i for i in ids if i != self.env.uid]).exists()
+            elif path[1] in ("name", "display_name") and isinstance(value, str):
+                users = Users.search([("name", "ilike", value), ("id", "!=", self.env.uid)], limit=3)
+            else:
+                continue
+            names += users.mapped("name")
+        names = ", ".join(dict.fromkeys(names))
+        if not names:
+            return ""
+        self._add_notice(state, _("You can only see records your access rights allow; records of %s aren't visible "
+                                  "to you.", names))
+        return (f" {names}'s records are hidden by this user's access rights whether or not any exist (the user was "
+                f"told). Say the user can't see {names}'s records; never say {names} has none, and give no count or total.")
 
     @api.model
     def _without_costs(self, tool, arguments, state):
@@ -432,6 +463,7 @@ class AiAgentEngineRead(models.AbstractModel):
         archived = self._archived_links(model, columns, rows, state) if rows else ""
         if not rows:
             return (f"[{ref}] No {label} records that this user can access match."
+                    f"{self._other_users_hidden(model, arguments, state)}"
                     f"{self._name_hint(model, arguments)}{self._selection_hint(model, arguments)}")
         more = f" There are {total - len(rows)} more; the user can open the full list in Odoo." if total > len(rows) else ""
         facts = (self._row_facts(columns, rows, currency_field) if state.get("share_data")
@@ -755,12 +787,13 @@ class AiAgentEngineRead(models.AbstractModel):
                 key_text += (f" {info.get('string') or spec} groups: {', '.join(found) or 'none'}"
                              + (f"; no records (0) with: {', '.join(none)}" if none else "") + ".")
         if not groups:
-            return f"[{ref}] No {label} records that this user can access match, so there are no groups."
+            return (f"[{ref}] No {label} records that this user can access match, so there are no groups."
+                    f"{self._other_users_hidden(model, arguments, state)}")
         if not groupby:
             count = structured.get("count")
             if count == 0:
                 return (f"[{ref}] No {label} records that this user can access match (0 records), so the totals "
-                        "are empty.")
+                        f"are empty.{self._other_users_hidden(model, arguments, state)}")
             matching = f"{count} matching" if count is not None else "the matching"
             return (f"[{ref}] Overall totals of {matching} {label} records (records this user can access) with "
                     f"the columns {self._column_text(columns)}.")

@@ -11,6 +11,7 @@ import uuid
 from odoo import _, api, models
 from odoo.exceptions import AccessError, UserError
 from odoo.fields import Domain
+from odoo.http import request
 from odoo.tools import ormcache
 
 from odoo.addons.mcp_server.controllers import utils as mcp_utils
@@ -429,6 +430,21 @@ class AiAgentEngineChecks(models.AbstractModel):
         return None
 
     @api.model
+    def _developer_mode(self):
+        """The user's browser is in developer mode: Odoo then also shows the menus of "Technical Features" (Link
+        Tracker, Technical...). Every internal user has that group; only the mode decides. Off outside a browser."""
+        try:
+            return bool(request) and bool(request.session.debug)
+        except RuntimeError:  # no HTTP request (shell, cron)
+            return False
+
+    @api.model
+    def _visible_menus(self, developer_mode=None):
+        """Ids of the menus this user sees in Odoo right now (or in developer mode / normal mode when given)."""
+        debug = self._developer_mode() if developer_mode is None else developer_mode
+        return set(self.env["ir.ui.menu"]._visible_menu_ids(debug))
+
+    @api.model
     def _app_blocked(self, model, state, depth=0):
         """The user's apps decide what the chatbot shows: data whose apps the user cannot open in Odoo's menu (e.g.
         Purchase: No) is refused, even where Odoo grants a read for linked documents. Only restricts, never grants;
@@ -441,8 +457,13 @@ class AiAgentEngineChecks(models.AbstractModel):
         cache[model] = None  # also stops loops between related models
         Menu = self.env["ir.ui.menu"]
         if "visible_roots" not in state:
-            visible = set(Menu._visible_menu_ids())
-            state["visible_roots"] = {m.id for m in Menu.sudo().search([("parent_id", "=", False)]) if m.id in visible}
+            apps = Menu.sudo().search([("parent_id", "=", False)])
+            visible = self._visible_menus()
+            state["visible_roots"] = {m.id for m in apps if m.id in visible}
+            # Apps Odoo would show this user in developer mode only (not in it now): the honest answer is "turn on
+            # developer mode", not "ask an administrator for access" (the user already has it).
+            in_developer_mode = visible if self._developer_mode() else self._visible_menus(True)
+            state["developer_roots"] = {m.id for m in apps if m.id in in_developer_mode} - state["visible_roots"]
         actions = self.env["ir.actions.act_window"].sudo().search([("res_model", "=", model)])
         menus = Menu.sudo().search([("action", "in", [f"ir.actions.act_window,{a.id}" for a in actions])]) \
             if actions else Menu.sudo()
@@ -452,10 +473,13 @@ class AiAgentEngineChecks(models.AbstractModel):
         message = None
         if roots:
             if not roots & state["visible_roots"]:
-                apps = Menu.sudo().browse(sorted(roots)).mapped("name")
-                message = _("You don't have access to %(apps)s, so I can't show these %(label)s records. An "
-                            "administrator can give you access in Settings > Users.", apps=" / ".join(apps),
-                            label=self._model_label(model).lower())
+                apps = " / ".join(Menu.sudo().browse(sorted(roots)).mapped("name"))
+                label = self._model_label(model).lower()
+                if roots & state["developer_roots"]:
+                    message = self._developer_mode_text(apps, label)
+                else:
+                    message = _("You don't have access to %(apps)s, so I can't show these %(label)s records. An "
+                                "administrator can give you access in Settings > Users.", apps=apps, label=label)
         elif depth < 2:
             # Lines follow their document: purchase order lines need access to Purchase. Only true parents count
             # (deleted with their lines), never people, companies or technical records.
@@ -468,6 +492,13 @@ class AiAgentEngineChecks(models.AbstractModel):
                         break
         cache[model] = message
         return message
+
+    @staticmethod
+    def _developer_mode_text(apps, label=None):
+        what = _("these %s records", label) if label else _("it")
+        return _("Odoo shows %(apps)s only in developer mode, so I can't show %(what)s right now. Turn on developer "
+                 "mode (add ?debug=1 to the page address, right after /odoo, and reload the page), then ask again.",
+                 apps=apps, what=what)
 
     @api.model
     def _tool_not_installed(self, state, step, call, model):

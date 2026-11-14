@@ -58,7 +58,7 @@ class AiAgentEngineScope(models.AbstractModel):
         """The menus of ``model`` the user can open, with each window action's own scope."""
         Menu = self.env["ir.ui.menu"]
         screens = {}
-        for menu in Menu.sudo().browse(sorted(Menu._visible_menu_ids())):
+        for menu in Menu.sudo().browse(sorted(self._visible_menus())):
             action = menu.action
             if not action or action._name != "ir.actions.act_window" or action.res_model != model:
                 continue
@@ -96,7 +96,7 @@ class AiAgentEngineScope(models.AbstractModel):
     def _tool_show_app(self, arguments, state):
         """A clickable card with the app's own icon, opening the app or one of its menus (as the user can see them)."""
         Menu = self.env["ir.ui.menu"]
-        visible = Menu.browse(Menu._visible_menu_ids())
+        visible = Menu.browse(self._visible_menus())  # as Odoo shows them now (developer mode included)
         roots = visible.filtered(lambda m: not m.parent_id)
 
         def root_of(menu):
@@ -395,6 +395,8 @@ class AiAgentEngineScope(models.AbstractModel):
                 lambda m: words and words in " ".join((m.complete_name or "").casefold().replace("/", " ").split()))
             hidden = root_of(found[:1]) if found else hidden
         if hidden and not self._is_admin():
+            if not self._developer_mode() and hidden.id in self._visible_menus(True):
+                return self._developer_mode_text(hidden.name)  # the user has access: Odoo only hides it
             return _("You don't have access to %s, so I can't open it. An administrator can give you access in "
                      "Settings > Users.", hidden.name)
         if wanted and not hidden:

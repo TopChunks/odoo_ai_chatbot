@@ -855,6 +855,13 @@ STYLE
         except (AccessError, MissingError, IndexError) as err:
             if name != "get_record":
                 message = error_sanitizer.sanitize_message(str(err.args[0] if err.args else err))
+                model = arguments.get("model")
+                if (isinstance(err, AccessError) and tool["kind"] in ("data", "chart") and name != "search_records"
+                        and isinstance(model, str) and model in self.env and self._can_list(model)):
+                    # e.g. employees: a non-HR user may list them, but Odoo refuses grouping and totals on them.
+                    message = _("Odoo lets this user list %(label)s records but not group, count or total them (that "
+                                "needs more rights). Say exactly that; do not say the records are hidden. Offer the "
+                                "plain list instead, or a related model's own totals.", label=self._model_label(model))
                 return self._tool_failed(state, step, call, self._explain_error(message))
             # Remember it: lines or other records filtered on it are not shown either (same neutral answer).
             state.setdefault("not_found", []).append([arguments.get("model"), arguments.get("record_id")])
@@ -874,6 +881,17 @@ STYLE
                        "Settings show it).")
         self._note(state, call, result)
         return result
+
+    @api.model
+    def _can_list(self, model):
+        """The user can list records of this model. Not has_access: Odoo HR, for example, answers a non-HR user's
+        employee search from the public directory although the model itself reports no read access."""
+        try:
+            with self.env.cr.savepoint():
+                self.env[model].search([], limit=1)
+            return True
+        except Exception:  # noqa: BLE001 - any refusal means no
+            return False
 
     # ------------------------------------------------------------------
     # Reply
