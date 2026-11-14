@@ -202,6 +202,9 @@ class AiAgentEngineWrite(models.AbstractModel):
         if message.model != "discuss.channel" or message.author_id != channel._ai_agent_partner():
             raise AccessError(_("This change preview is not available."))
         channel._ai_agent_check_conversation()
+        # One decision per preview: a second click (another tab) waits here, then sees it is no longer pending.
+        self.env.cr.execute("SELECT id FROM mail_message WHERE id = %s FOR UPDATE", [message.id])
+        message.invalidate_recordset(["ai_agent_payload", "ai_agent_trace"])
         payload = copy.deepcopy(message.sudo().ai_agent_payload or {})
         block = next((b for b in payload.get("blocks", []) if b.get("id") == block_id and b.get("type") == "action"),
                      None)

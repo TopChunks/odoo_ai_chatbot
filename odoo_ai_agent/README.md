@@ -335,7 +335,7 @@ Go to **Settings → Users**, open a user, and under **Access Rights → AI Agen
 
 | Access | They can |
 |---|---|
-| **User** | Chat with the AI, open Business Flow, see their own usage. |
+| **User** | Chat with the AI and open Business Flow. |
 | **Administrator** | Everything above, plus the settings, everyone's usage and cost, and updating the business flow context. |
 
 > Users do **not** need the *MCP User* group. That group is only for connecting **outside** AI apps to Odoo ([section 8](#8-mcp-server-how-it-works-with-the-chatbot)).
@@ -415,7 +415,7 @@ A dashboard of how the AI is used:
 - the busiest hours and the most-used tools;
 - failed requests and their error messages.
 
-Users see their own usage. Administrators see everyone's.
+This menu is for AI Agent administrators only.
 
 ### ⚙️ Configuration → Settings
 

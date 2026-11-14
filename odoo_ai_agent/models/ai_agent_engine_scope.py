@@ -591,6 +591,10 @@ class AiAgentEngineScope(models.AbstractModel):
             similar = difflib.get_close_matches(field_name or "", list(Model._fields), n=5, cutoff=0.5)
             raise UserError(_("%(model)s has no field %(field)s. Similar: %(similar)s",
                               model=model, field=field_name, similar=", ".join(similar) or "-"))
+        if not Model._has_field_access(field, "read"):
+            # The history is read with sudo below: a field restricted to some groups stays hidden, like in the chatter.
+            raise AccessError(_("You do not have access to the %(field)s field of %(model)s.", field=field.string,
+                                model=self._model_label(model)))
         if not getattr(field, "tracking", False):
             raise UserError(_("Odoo does not keep a history of %(field)s on %(model)s, so the date of these changes "
                               "is unknown.", field=field.string, model=self._model_label(model)))

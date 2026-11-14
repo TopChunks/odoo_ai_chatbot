@@ -29,11 +29,12 @@
     <t t-name="odoo_ai_agent.ErrorResolutionButtons">
         <button t-if="aiResolution.enabled and !aiResolution.answer" class="btn btn-secondary"
                 t-att-disabled="aiResolution.loading" t-on-click="resolveWithAI">
-            <i class="fa fa-magic me-1"/>
+            <i class="o-ai-agent-glyph me-1" role="img" aria-hidden="true"/>
             <t t-if="aiResolution.loading">Analysing…</t>
             <t t-else="">Resolve with AI</t>
         </button>
         <button t-if="aiResolution.answer" class="btn btn-secondary" t-on-click="continueInAiAgent">
+            <i class="o-ai-agent-glyph me-1" role="img" aria-hidden="true"/>
             Continue in AI Agent
         </button>
     </t>

@@ -47,7 +47,7 @@ class AiAgentController(http.Controller):
     @http.route("/ai_agent/resolve_error", type="jsonrpc", auth="user")
     def resolve_error(self, message, exception_name, model=None, method=None, record_ids=None, traceback=None):
         if not request.env.user.has_group("odoo_ai_agent.group_ai_agent_user"):
-            raise AccessError("AI Agent access is required.")
+            raise AccessError(_("AI Agent access is required."))
         if not isinstance(record_ids, list):
             record_ids = []
         result = request.env["ai_agent.engine"].resolve_validation_error(

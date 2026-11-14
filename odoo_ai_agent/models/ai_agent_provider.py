@@ -227,7 +227,7 @@ class AiAgentProvider(models.Model):
         detail = str(detail)[:300]
         if status in (401, 403):
             text = _("%(provider)s rejected the API key (HTTP %(status)s). Check the key in AI Agent > "
-                     "Configuration > AI Providers.", provider=self.name, status=status)
+                     "Configuration > Settings.", provider=self.name, status=status)
         elif status == 404:
             text = _("%(provider)s does not offer this model to your API key (HTTP 404). Refresh the model list "
                      "and choose another model.", provider=self.name)

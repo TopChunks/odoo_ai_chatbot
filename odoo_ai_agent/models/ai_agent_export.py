@@ -147,7 +147,8 @@ class AiAgentExport(models.AbstractModel):
         title = self._title(block)
         output = io.BytesIO()
         workbook = xlsxwriter.Workbook(output, {"in_memory": True})
-        sheet = workbook.add_worksheet(_("Data")[:31])
+        sheet_name = _("Data")[:31]
+        sheet = workbook.add_worksheet(sheet_name)
         title_format = workbook.add_format({"bold": True, "font_size": 14})
         header_format = workbook.add_format({"bold": True, "bg_color": "#EDE9FE", "border": 1})
         number_format = workbook.add_format({"num_format": "#,##0.00", "border": 1})
@@ -172,10 +173,10 @@ class AiAgentExport(models.AbstractModel):
                 options["subtype"] = "stacked"
             chart = workbook.add_chart(options)
             for col in value_columns:
-                chart.add_series({
-                    "name": ["Data", 3, col],
-                    "categories": ["Data", 4, 0, last_row, 0],
-                    "values": ["Data", 4, col, last_row, col],
+                chart.add_series({  # the sheet's real (translated) name, or the chart points at nothing
+                    "name": [sheet_name, 3, col],
+                    "categories": [sheet_name, 4, 0, last_row, 0],
+                    "values": [sheet_name, 4, col, last_row, col],
                 })
             chart.set_title({"name": title})
             chart.set_size({"width": 720, "height": 400})

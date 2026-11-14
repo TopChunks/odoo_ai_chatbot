@@ -87,11 +87,12 @@ class AiAgentEngineChecks(models.AbstractModel):
         try:
             aggregator = (self.env[model]._fields[measure].aggregator or "sum") if measure != "__count" else None
             aggregate = f"{measure}:{aggregator}" if aggregator else "__count"
-            groups = self.env[model].formatted_read_group(
-                block.get("domain") or [], groupby, [aggregate], order=f"{aggregate} {'asc' if lowest else 'desc'}",
-                limit=limit)
+            with self.env.cr.savepoint():  # runs while the answer is posted: a failed query must not abort it
+                groups = self.env[model].formatted_read_group(
+                    block.get("domain") or [], groupby, [aggregate], order=f"{aggregate} {'asc' if lowest else 'desc'}",
+                    limit=limit)
         except Exception:  # noqa: BLE001 - a note is optional
-            _logger.debug("AI Agent: skipped (%s)", 'a note is optional', exc_info=True)
+            _logger.debug("AI Agent: skipped (a note is optional)", exc_info=True)
             return []
         field = self.env[model]._fields.get(groupby[0].split(":")[0])
         titled = field is not None and field.type == "many2one" and "title" in self.env[field.comodel_name]._fields

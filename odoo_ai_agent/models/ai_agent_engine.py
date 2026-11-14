@@ -611,7 +611,8 @@ STYLE
         ]
         suggestions = []
         for model, text in examples:
-            if model in self.env and mcp_utils.check_model_operation_allowed(self.env, model, "read")                     and self.env[model].has_access("read"):
+            if (model in self.env and mcp_utils.check_model_operation_allowed(self.env, model, "read")
+                    and self.env[model].has_access("read")):
                 suggestions.append(text)
         return suggestions[:4] or [_("What can you do?")]
 
@@ -829,33 +830,25 @@ STYLE
         blocked = self._not_enabled(name, arguments)
         if blocked:
             return self._tool_not_enabled(state, step, call, blocked)
+        handlers = {
+            "chart": lambda: self._tool_chart(arguments, state),
+            "history": lambda: self._tool_history(arguments, config, state),
+            "present": lambda: self._tool_present(arguments, state),
+            "filters": lambda: self._tool_get_filters(arguments),
+            "app": lambda: self._tool_show_app(arguments, state),
+            "calculate": lambda: self._tool_calculate(arguments, state),
+            "conversation_stats": lambda: self._tool_conversation_stats(arguments, state),
+            "access_rights": lambda: self._tool_access_rights(arguments, state),
+            "settings": lambda: self._tool_find_setting(arguments, state),
+            "changes": lambda: self._tool_find_changes(arguments, state),
+            "business_flow": lambda: self._tool_search_business_flow(arguments),
+            "write": lambda: self._tool_propose(tool, arguments, state),
+        }
         try:
-            if tool["kind"] == "chart":
-                result = self._tool_chart(arguments, state)
-            elif tool["kind"] == "history":
-                result = self._tool_history(arguments, config, state)
-            elif tool["kind"] == "present":
-                result = self._tool_present(arguments, state)
-            elif tool["kind"] == "filters":
-                result = self._tool_get_filters(arguments)
-            elif tool["kind"] == "app":
-                result = self._tool_show_app(arguments, state)
-            elif tool["kind"] == "calculate":
-                result = self._tool_calculate(arguments, state)
-            elif tool["kind"] == "conversation_stats":
-                result = self._tool_conversation_stats(arguments, state)
-            elif tool["kind"] == "access_rights":
-                result = self._tool_access_rights(arguments, state)
-            elif tool["kind"] == "settings":
-                result = self._tool_find_setting(arguments, state)
-            elif tool["kind"] == "changes":
-                result = self._tool_find_changes(arguments, state)
-            elif tool["kind"] == "business_flow":
-                result = self._tool_search_business_flow(arguments)
-            elif tool["kind"] == "write":
-                result = self._tool_propose(tool, arguments, state)
-            else:
-                result = self._tool_read(tool, arguments, config, state)
+            # One savepoint per tool: a query the database rejects (text on a number field...) is rolled back on its
+            # own, so the AI gets the error to correct and the answer can still be posted.
+            with self.env.cr.savepoint():
+                result = handlers.get(tool["kind"], lambda: self._tool_read(tool, arguments, config, state))()
         except (AccessError, MissingError, IndexError) as err:
             if name != "get_record":
                 message = error_sanitizer.sanitize_message(str(err.args[0] if err.args else err))

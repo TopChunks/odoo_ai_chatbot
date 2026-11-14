@@ -35,11 +35,11 @@ class ResConfigSettings(models.TransientModel):
         "related custom code are sent to the configured AI provider; record values only if data sharing is on.",
     )
     ai_agent_business_flow_enabled = fields.Boolean(
-        string="Answer from custom business-flow code",
+        string="Business flow context",
         config_parameter="odoo_ai_agent.business_flow_enabled",
-        help="Allows the AI to use relevant excerpts from the administrator-built index of installed custom modules, "
-        "Studio views and automation rules. Relevant excerpts are sent to the configured AI provider when users ask "
-        "about instance workflows.",
+        help="Builds the Business Flow menu and lets the AI explain this database's processes from its custom modules, "
+        "Studio views and automation rules. Relevant excerpts are sent to the AI provider only when a user asks about "
+        "a process or resolves an error.",
     )
     ai_agent_max_steps = fields.Integer(
         string="Maximum tool steps per answer", config_parameter="odoo_ai_agent.max_steps", default=8
