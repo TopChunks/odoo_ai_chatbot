@@ -22,6 +22,16 @@ DUPLICATE_INTENT = re.compile(r"\b(?:duplicat\w*|same (?:contact|customer|vendor
                               re.IGNORECASE)
 DUPLICATE_KEYS = ("email", "phone", "mobile", "vat", "company_registry", "default_code", "barcode", "work_email")
 
+# Order questions about invoicing, payment or delivery: Odoo adds those statuses to the order table.
+ORDER_STATUS_INTENT = (
+    # Status words only: "book a delivery truck" or "create an invoice" is not a question about these statuses.
+    ("invoiced", re.compile(r"\b(?:(?:un|fully |partly |partially )?invoiced|to (?:be )?invoiced?|invoic(?:e|ing) status|"
+                            r"(?:un)?billed|to (?:be )?bill(?:ed)?|billing status|(?:vendor )?bills)\b", re.IGNORECASE)),
+    ("paid", re.compile(r"\b(?:(?:un|fully |partly |partially )?paid|payment status)\b", re.IGNORECASE)),
+    ("delivered", re.compile(r"\b(?:(?:un|fully |partly |partially )?(?:delivered|received)|shipped|dispatched|"
+                             r"(?:delivery|receipt) status)\b", re.IGNORECASE)),
+)
+
 # A filter whose domain depends on today (Late, Overdue, Late Activities...).
 DATED_DOMAIN = re.compile(r"context_today|current_date|['\"](?:now|today)['\"]|relativedelta|datetime|time\.strftime")
 
@@ -494,7 +504,7 @@ class AiAgentEngineRead(models.AbstractModel):
         rows = self._with_x2many_names(columns, [dict(row) for row in rows], state)
         rows = self._with_document_names(columns, rows)
         rows = self._with_titles(model, rows)
-        roles = self._same_name_roles(model, columns, rows)
+        roles = self._same_name_roles(model, columns, rows) + self._order_status_columns(model, columns, rows, state)
         currency_field = next((c["currency_field"] for c in columns if c.get("currency_field")), None)
         ref = self._ai_add_result(state, {
             "type": "table",
@@ -534,6 +544,89 @@ class AiAgentEngineRead(models.AbstractModel):
             f"{self._exact_name(model, arguments, ids)}{archived}{self._duplicate_rows(model, columns, rows, state)}"
             f"{roles}"
         )
+
+    @api.model
+    def _order_status_columns(self, model, columns, rows, state):
+        """"Is each order fully invoiced and paid?" With data sharing off the AI does not see invoiced quantities or
+        payments, and once filled the gap with a guess ("partly invoiced" when nothing was). When the question asks
+        about invoicing, payment or delivery, Odoo adds those statuses in plain words to the order table and gives
+        the AI their counts (statuses only, read with the user's rights). Returns the text for the AI."""
+        if model not in ("sale.order", "purchase.order") or not rows:
+            return ""
+        question = state.get("question") or ""
+        wanted = [key for key, pattern in ORDER_STATUS_INTENT if pattern.search(question)]
+        ids = [row["id"] for row in rows if isinstance(row.get("id"), int)]
+        if not wanted or not ids:
+            return ""
+        # Users who cannot open Invoicing are refused invoice data everywhere in the chat: no status read from invoices.
+        invoices_hidden = bool(self._app_blocked("account.move", state))
+        try:
+            with self.env.cr.savepoint():
+                orders = self.env[model].browse(ids).exists()._filtered_access("read")
+                facts = {order.id: {key: self._order_status(order, key, invoices_hidden) for key in wanted}
+                         for order in orders}
+        except Exception:  # noqa: BLE001 - the table is still right without these columns
+            return ""
+        purchase = model == "purchase.order"
+        labels = {"invoiced": _("Billed") if purchase else _("Invoiced"), "paid": _("Paid"),
+                  "delivered": _("Received") if purchase else _("Delivered")}
+        told = []
+        for key in wanted:
+            values = {order_id: fact[key] for order_id, fact in facts.items() if fact[key]}
+            if not values:
+                continue  # e.g. no access to invoices: no Paid column rather than a wrong one
+            name = f"__{key}"
+            columns.append({"name": name, "label": labels[key], "type": "char"})
+            for row in rows:
+                row[name] = values.get(row.get("id"), "")
+            counts = {}
+            for value in values.values():
+                counts[value] = counts.get(value, 0) + 1
+            told.append(f"{labels[key]}: " + ", ".join(f"{value} {count}" for value, count in counts.items()))
+        if not told:
+            return ""
+        return (f" Odoo added exact status columns for these {len(facts)} orders ({'; '.join(told)}). Answer from them; "
+                "never describe invoiced, paid or delivered quantities or amounts you were not given.")
+
+    @api.model
+    def _order_status(self, order, key, invoices_hidden=False):
+        """One order's invoicing, payment or delivery status in plain words, from Odoo's own fields ("" if the user
+        may not read what it needs)."""
+        purchase = order._name == "purchase.order"
+        posted = None
+        if not invoices_hidden:
+            try:
+                with self.env.cr.savepoint():
+                    posted = order.invoice_ids.filtered(
+                        lambda m: m.state == "posted" and m.move_type in ("out_invoice", "in_invoice"))
+                    posted.mapped("payment_state")  # read now: no access to invoices -> no invoice-based status
+            except Exception:  # noqa: BLE001
+                posted = None
+        if key == "delivered":
+            status = order.receipt_status if purchase else order.delivery_status
+            return {"pending": _("Not received") if purchase else _("Not delivered"),
+                    "started": _("Delivery started"),
+                    "partial": _("Partly received") if purchase else _("Partly delivered"),
+                    "full": _("Fully received") if purchase else _("Fully delivered")}.get(
+                status, _("Nothing to receive") if purchase else _("Nothing to deliver"))
+        if key == "invoiced":
+            done, part, none = ((_("Fully billed"), _("Partly billed"), _("Nothing billed")) if purchase else
+                                (_("Fully invoiced"), _("Partly invoiced"), _("Nothing invoiced")))
+            if order.invoice_status in ("invoiced", "upselling"):
+                return done
+            if posted is None:
+                return _("Not fully billed") if purchase else _("Not fully invoiced")
+            if order.invoice_status == "to invoice":
+                return part if posted else none
+            return part if posted else (_("Nothing to bill yet") if purchase else _("Nothing to invoice yet"))
+        if posted is None:
+            return ""
+        if not posted:
+            return _("Not billed yet") if purchase else _("Not invoiced yet")
+        states = set(posted.mapped("payment_state"))
+        if states <= {"paid", "in_payment", "reversed"}:
+            return _("Paid") if order.invoice_status in ("invoiced", "upselling") else _("Invoices paid (not fully invoiced)")
+        return _("Partly paid") if states & {"paid", "in_payment", "partial"} else _("Not paid")
 
     @api.model
     def _same_name_roles(self, model, columns, rows):
