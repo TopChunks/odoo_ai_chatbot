@@ -617,8 +617,9 @@ class AiAgentEngineRead(models.AbstractModel):
 
     @api.model
     def _word_start_matches(self, arguments, rows, total):
-        """"Ravi" also finds "Travis" (Odoo searches inside words): when some names start a word with what the
-        user wrote, keep only those. Nothing is dropped when no name does (a real partial search)."""
+        """"Ravi" also finds "Travis" and "Rama" finds "Ramathulasi" (Odoo searches inside words): when some names
+        hold what the user wrote as a whole word, keep only those; else when some start a word with it, keep those.
+        Nothing is dropped when no name does (a real partial search, e.g. "Alph")."""
         names = self._searched_names(self._domain(arguments))
         if len(names) != 1 or len(rows) < 2:
             return rows, total
@@ -632,10 +633,14 @@ class AiAgentEngineRead(models.AbstractModel):
 
         if not all(name_of(row) for row in rows):
             return rows, total
-        kept = [row for row in rows if starts.search(name_of(row))]
-        if not kept or len(kept) == len(rows):
-            return rows, total
-        return kept, max(len(kept), total - (len(rows) - len(kept)))
+        whole = re.compile(r"(?<![^\W\d_])" + re.escape(word) + r"(?![^\W\d_])", re.IGNORECASE)
+        for pattern in (whole, starts):
+            kept = [row for row in rows if pattern.search(name_of(row))]
+            if len(kept) == len(rows):
+                return rows, total  # every name matches this way: nothing to drop
+            if kept:
+                return kept, max(len(kept), total - (len(rows) - len(kept)))
+        return rows, total
 
     @api.model
     def _exact_name(self, model, arguments, ids):
@@ -649,8 +654,9 @@ class AiAgentEngineRead(models.AbstractModel):
         exact = [r.id for r in self.env[model].browse(ids[:80]) if (r.display_name or "").strip().lower() == name]
         if len(exact) != 1:
             return ""
-        return (f" Record ID {exact[0]} has exactly the name the user wrote: use that one (the others only contain "
-                "it); do not mention IDs to the user.")
+        return (f" Record ID {exact[0]} has exactly the name the user wrote: it is the one the user means. Answer "
+                "about it only, confidently, and do not mention the other matches (their names only contain the "
+                "word) unless the user asks; do not mention IDs to the user.")
 
     @api.model
     def _name_hint(self, model, arguments):
