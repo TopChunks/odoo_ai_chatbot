@@ -455,6 +455,7 @@ class AiAgentEngineRead(models.AbstractModel):
         rows = self._with_x2many_names(columns, [dict(row) for row in rows], state)
         rows = self._with_document_names(columns, rows)
         rows = self._with_titles(model, rows)
+        roles = self._same_name_roles(model, columns, rows)
         currency_field = next((c["currency_field"] for c in columns if c.get("currency_field")), None)
         ref = self._ai_add_result(state, {
             "type": "table",
@@ -491,7 +492,56 @@ class AiAgentEngineRead(models.AbstractModel):
             f"[{ref}] {total} {label} record(s) that this user can access match; {len(rows)} rows with the columns "
             f"{self._column_text(columns)}. Record IDs: {ids[:60]}.{self._own_records_note(model)}{linked}{more}{facts}"
             f"{self._exact_name(model, arguments, ids)}{archived}{self._duplicate_rows(model, columns, rows, state)}"
+            f"{roles}"
         )
+
+    @api.model
+    def _same_name_roles(self, model, columns, rows):
+        """Contacts with the same name ("Rama" the customer and "Rama" an employee's work contact) look identical in
+        a table. Add a Role column saying what each one is: employee, user, customer or vendor with how many documents
+        (counts only, read with the user's own rights, so nothing they cannot see is counted). Returns the text for
+        the AI ("" when every name is different)."""
+        if model != "res.partner" or len(rows) < 2:
+            return ""
+        names = {}
+        for row in rows:
+            if isinstance(row.get("id"), int):
+                names.setdefault(str(row.get("name") or row.get("display_name") or "").strip().lower(), []).append(row)
+        twins = [row for group in names.values() if len(group) > 1 for row in group]
+        if not twins:
+            return ""
+
+        def count(model_name, domain):
+            if model_name not in self.env:
+                return 0
+            try:
+                with self.env.cr.savepoint():
+                    return self.env[model_name].search_count(domain)
+            except Exception:  # noqa: BLE001 - no access to that app: not counted
+                return 0
+
+        for row in twins:
+            pid, parts = row["id"], []
+            if count("hr.employee", [("work_contact_id", "=", pid)]):
+                parts.append(_("employee"))
+            if count("res.users", [("partner_id", "=", pid)]):
+                parts.append(_("user"))
+            sales = [(count("account.move", [("partner_id", "=", pid), ("move_type", "=", "out_invoice"),
+                                              ("state", "=", "posted")]), _("%s invoices")),
+                     (count("sale.order", [("partner_id", "=", pid)]), _("%s sales orders"))]
+            buys = [(count("account.move", [("partner_id", "=", pid), ("move_type", "=", "in_invoice"),
+                                             ("state", "=", "posted")]), _("%s vendor bills")),
+                    (count("purchase.order", [("partner_id", "=", pid)]), _("%s purchase orders"))]
+            for label, found in ((_("customer"), sales), (_("vendor"), buys)):
+                found = [text % n for n, text in found if n]
+                if found:
+                    parts.append(f"{label} ({', '.join(found)})")
+            row["__role"] = "; ".join(parts) or _("no documents you can access")
+        columns.append({"name": "__role", "label": _("Role"), "type": "char"})
+        described = "; ".join(f"ID {row['id']} {row.get('name')}: {row['__role']}" for row in twins)
+        return (f" Several rows have the same name; Odoo added a Role column to tell them apart ({described}). Use the "
+                "one that fits the question (e.g. the customer with invoices for what someone owes); ask only if "
+                "more than one fits, naming them by role, not by ID.")
 
     @api.model
     def _duplicate_rows(self, model, columns, rows, state):
