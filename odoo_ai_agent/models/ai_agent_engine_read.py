@@ -22,6 +22,9 @@ DUPLICATE_INTENT = re.compile(r"\b(?:duplicat\w*|same (?:contact|customer|vendor
                               re.IGNORECASE)
 DUPLICATE_KEYS = ("email", "phone", "mobile", "vat", "company_registry", "default_code", "barcode", "work_email")
 
+# A filter whose domain depends on today (Late, Overdue, Late Activities...).
+DATED_DOMAIN = re.compile(r"context_today|current_date|['\"](?:now|today)['\"]|relativedelta|datetime|time\.strftime")
+
 # Chatter, activity, presence and login helpers: technical, not data a user asks for.
 RESTRICTED_SKIP_PREFIXES = ("activity_", "my_activity", "message_", "website_message", "rating_", "presence",
                             "is_in_call", "signup_", "totp")
@@ -49,6 +52,7 @@ class AiAgentEngineRead(models.AbstractModel):
             existing = state.setdefault("signatures", {}).get(signature)
             if existing:
                 return f"[{existing}] Same query as {existing}; use that result."
+        used_odoo_filters = bool(arguments.get("filters") or arguments.get("screen"))
         if any(key in arguments for key in ("screen", "filters", "period")):
             model = arguments.get("model")
             if model in self.env:
@@ -105,6 +109,8 @@ class AiAgentEngineRead(models.AbstractModel):
         else:
             summary = self._block_text(name, text, state, signature)
         summary += dropped + left_out + self._date_meanings(arguments)
+        if not used_odoo_filters and name in ("search_records", "aggregate_records"):
+            summary += self._dated_filter_hint(arguments.get("model"), state)
         if config["share_data"]:
             summary += "\n\nRESULT (also shown to the user):\n" + text[:SHARED_TEXT_CAP]
         return summary
@@ -196,6 +202,34 @@ class AiAgentEngineRead(models.AbstractModel):
                                   "to you.", names))
         return (f" {names}'s records are hidden by this user's access rights whether or not any exist (the user was "
                 f"told). Say the user can't see {names}'s records; never say {names} has none, and give no count or total.")
+
+    @staticmethod
+    def _exact_filters_text(state, signature):
+        """An empty result that came from Odoo's own screens or filters ("Late"): it is exact. Hints that a guessed
+        status value may be wrong would make the AI doubt Odoo's definition, so they are not given."""
+        labels = (state.get("filter_labels") or {}).get(signature)
+        if not labels:
+            return ""
+        return (f" This used Odoo's own {'; '.join(labels)}, so the result is exact: nothing matches. Say so plainly; "
+                "do not doubt it or run your own version of the filter.")
+
+    @api.model
+    def _dated_filter_hint(self, model, state):
+        """The user's words name one of the model's own filters that depends on today ("late" -> Late: start date
+        before now and Confirmed), but the AI searched without it. Its own date logic then differs from Odoo's
+        definition, so Odoo points to the filter. Only date-based filters: the ones the AI cannot rebuild exactly."""
+        if not isinstance(model, str) or model not in self.env:
+            return ""
+        words = set(re.findall(r"\w+", (state.get("question") or "").lower()))
+        if not words:
+            return ""
+        for name, info in self._named_filters(model).items():
+            label = re.findall(r"\w+", str(info["label"]).lower())
+            if label and set(label) <= words and DATED_DOMAIN.search(info["domain"]):
+                return (f" Odoo has its own filter for this question: '{info['label']}' ({name}), defined relative to "
+                        f"today. Run the query again with filters [\"{name}\"] and answer from that result, so the "
+                        "answer follows Odoo's definition exactly.")
+        return ""
 
     @api.model
     def _without_costs(self, tool, arguments, state):
@@ -487,9 +521,10 @@ class AiAgentEngineRead(models.AbstractModel):
         ids = [row.get("id") for row in rows if row.get("id")]
         archived = self._archived_links(model, columns, rows, state) if rows else ""
         if not rows:
+            exact = self._exact_filters_text(state, signature)
             return (f"[{ref}] No {label} records that this user can access match."
                     f"{self._other_users_hidden(model, arguments, state)}"
-                    f"{self._name_hint(model, arguments)}{self._selection_hint(model, arguments)}")
+                    + (exact or f"{self._name_hint(model, arguments)}{self._selection_hint(model, arguments)}"))
         more = f" There are {total - len(rows)} more; the user can open the full list in Odoo." if total > len(rows) else ""
         facts = (self._row_facts(columns, rows, currency_field) if state.get("share_data")
                  else self._empty_columns(columns, rows))
@@ -910,7 +945,7 @@ class AiAgentEngineRead(models.AbstractModel):
                              + (f"; no records (0) with: {', '.join(none)}" if none else "") + ".")
         if not groups:
             return (f"[{ref}] No {label} records that this user can access match, so there are no groups."
-                    f"{self._other_users_hidden(model, arguments, state)}")
+                    f"{self._other_users_hidden(model, arguments, state)}{self._exact_filters_text(state, signature)}")
         if not groupby:
             count = structured.get("count")
             if count == 0:

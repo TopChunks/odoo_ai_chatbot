@@ -599,8 +599,8 @@ STYLE
 - Never write tables of data in your text: show them with present. In your text, explain and highlight what matters.
 - "Which … the most / top / lowest …" questions: sort the result by that figure (order desc, or asc for lowest). Odoo names the top row in a note under the table, so say the answer is highlighted below; never ask the user to find it in the table.
 - When you limit the records in a way the user did not say (only leads, not opportunities; only confirmed orders), say so in a few words.
-- A correct search that finds nothing is the answer ("No deliveries are ready to ship today."): say it plainly; never doubt it or say you cannot tell whether it is accurate.
-- Never mention tools, MCP, JSON, domains, result names like r1, or record and user IDs unless the user asks."""
+- A correct search that finds nothing is the answer ("No deliveries are ready to ship today."): say it plainly; never doubt it or say you cannot tell whether it is accurate, and do not add other records "for context" unless the user asks.
+- Never mention tools, MCP, JSON, domains, result names like r1, or record and user IDs unless the user asks. Never describe your own searches or what you did not check: state the answer."""
 
     @api.model
     def _suggestions(self):
