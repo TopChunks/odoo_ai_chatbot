@@ -505,6 +505,9 @@ class AiAgentEngine(models.AbstractModel):
                 "read it: show the record and say in one sentence that an administrator can turn on \"Share record "
                 "values with the AI provider\" in AI Agent settings for that.\n"
                 "- Never ask the user to paste data you could look up.\n"
+                "- \"Explain that simply\" about a status shown: explain in plain words what each status of that "
+                "document means (get_fields gives its labels, e.g. a delivery's Ready means the goods are reserved "
+                "and can be shipped). Say which one applies only if you checked it with a filter.\n"
             )
         return f"""You are AI Agent, the assistant built into Odoo {release.major_version} for {self.env.company.name}.
 Today is {today.isoformat()} ({today.strftime('%A')}). The user is {user.name} (user id {user.id}, partner id {user.partner_id.id}), timezone {user.tz or 'UTC'}, language {user.lang or 'en_US'}. Active companies: {companies}.

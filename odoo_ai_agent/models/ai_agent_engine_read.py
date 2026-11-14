@@ -143,6 +143,25 @@ class AiAgentEngineRead(models.AbstractModel):
         return None
 
     @api.model
+    def _own_records_note(self, model):
+        """A normal user with "own documents only" rights: every record they can see is theirs (or unassigned). Said as
+        a fact, so the AI never calls such a list "across all salespeople" nor needs the "my" filter to be right."""
+        if self._is_admin() or model not in self.env:
+            return ""
+        field = self.env[model]._fields.get("user_id")
+        if field is None or field.type != "many2one" or field.comodel_name != "res.users":
+            return ""
+        try:
+            with self.env.cr.savepoint():
+                others = self.env[model].search_count([("user_id", "not in", [False, self.env.uid])], limit=1)
+        except Exception:  # noqa: BLE001 - only a hint
+            return ""
+        if others:
+            return ""
+        return (" Every record of this kind that this user can access is their own or unassigned (their access "
+                "rights show only their own documents): this list is their own records, never 'all salespeople'.")
+
+    @api.model
     def _other_users_hidden(self, model, arguments, state):
         """A normal user filtered on another user ("Daniel's opportunities") and found nothing. Record rules hide other
         people's records, so that says nothing about them: tell the user neutrally (the same whether or not any exist)
@@ -470,7 +489,7 @@ class AiAgentEngineRead(models.AbstractModel):
                  else self._empty_columns(columns, rows))
         return (
             f"[{ref}] {total} {label} record(s) that this user can access match; {len(rows)} rows with the columns "
-            f"{self._column_text(columns)}. Record IDs: {ids[:60]}.{linked}{more}{facts}"
+            f"{self._column_text(columns)}. Record IDs: {ids[:60]}.{self._own_records_note(model)}{linked}{more}{facts}"
             f"{self._exact_name(model, arguments, ids)}{archived}{self._duplicate_rows(model, columns, rows, state)}"
         )
 
