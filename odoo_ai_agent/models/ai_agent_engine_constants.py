@@ -163,9 +163,9 @@ SHOW_APP_SCHEMA = {
 BUSINESS_FLOW_SCHEMA = {
     "type": "object",
     "properties": {
-        "query": {"type": "string", "description": "A short description of the instance workflow or behavior to find, "
-                  "with the business words and, if known, field or button names (e.g. 'purchase order confirm "
-                  "budget code approval')."},
+        "query": {"type": "string", "description": "A short description of the process, action or behavior to find, "
+                  "with the business words and, if known, field or button names (e.g. 'cancel posted invoice', "
+                  "'purchase order confirm budget code approval')."},
         "model": {"type": "string", "description": "Optional technical model the flow is about, e.g. purchase.order."},
     },
     "required": ["query"],

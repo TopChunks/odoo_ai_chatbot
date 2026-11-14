@@ -352,20 +352,22 @@ class AiAgentBusinessFlow(models.Model):
                     _logger.warning("Business Flow: %s (%s) skipped, it could not be read.", label, model, exc_info=True)
             if not steps:
                 continue
-            text = [_("Business flow: %(name)s. Documents in order: %(chain)s.", name=name,
-                      chain=" -> ".join(step[0] for step in steps))]
-            for label, stages, actions, rules in steps:
-                text.append(_("%(doc)s stages: %(stages)s.", doc=label,
-                              stages=" -> ".join(stage for _key, stage in stages) or "-"))
-                text += [_("%(doc)s action %(action)s%(when)s, done by %(who)s.", doc=label, action=action,
-                           when=_(" (stage: %s)", when) if when else "", who=who) for action, when, who in actions]
-                text += [f"{label}: {rule}" for rule in rules]
             self.sudo().create({
                 "name": name, "sequence": sequence, "documents": " → ".join(step[0] for step in steps),
                 "stage_count": sum(len(step[1]) for step in steps), "action_count": sum(len(step[2]) for step in steps),
                 "rule_count": sum(len(step[3]) for step in steps), "diagram": self._diagram(steps),
             })
-            chunks.append({"module_name": "business flow", "source_path": _("Business Flow: %s", name),
-                           "line_start": 1, "kind": "flow", "model_name": read[0], "symbol": name,
-                           "content": "\n".join(text)[:3000]})
+            # One text per document, each headed by the whole journey: a whole flow (Sales has five documents) is
+            # longer than one excerpt, and its last documents (delivery, invoice, payment) would be cut off.
+            journey = _("Business flow: %(name)s. Documents in order: %(chain)s.", name=name,
+                        chain=" -> ".join(step[0] for step in steps))
+            for model, (label, stages, actions, rules) in zip(read, steps):
+                text = [journey, _("%(doc)s stages: %(stages)s.", doc=label,
+                                   stages=" -> ".join(stage for _key, stage in stages) or "-")]
+                text += [_("%(doc)s action %(action)s%(when)s, done by %(who)s.", doc=label, action=action,
+                           when=_(" (stage: %s)", when) if when else "", who=who) for action, when, who in actions]
+                text += [f"{label}: {rule}" for rule in rules]
+                chunks.append({"module_name": "business flow", "source_path": _("Business Flow: %s", name),
+                               "line_start": 1, "kind": "flow", "model_name": model, "symbol": f"{name}: {label}",
+                               "content": "\n".join(text)[:3000]})
         return chunks
