@@ -14,8 +14,12 @@ from odoo.addons.mcp_server.controllers import utils as mcp_utils
 
 from .ai_agent_engine_constants import (
     ARCHIVED_NOTE_MODELS, CELL_TEXT_CAP, COST_FIELDS, COST_HIDDEN, DUPLICATE_CHECK_MODELS, NAME_HINT_MODELS,
-    SCHEMA_TEXT_CAP, SHARED_TEXT_CAP, TABLE_ROW_CAP,
+    SCHEMA_TEXT_CAP, SETTING_SECRET, SHARED_TEXT_CAP, TABLE_ROW_CAP,
 )
+
+# Chatter, activity, presence and login helpers: technical, not data a user asks for.
+RESTRICTED_SKIP_PREFIXES = ("activity_", "my_activity", "message_", "website_message", "rating_", "presence",
+                            "is_in_call", "signup_", "totp")
 
 _logger = logging.getLogger(__name__)
 
@@ -73,7 +77,7 @@ class AiAgentEngineRead(models.AbstractModel):
                 if name == "get_fields" and isinstance(arguments.get("model"), str) and arguments["model"] in self.env:
                     # How the screens show these fields: their labels there can differ (price_subtotal is
                     # "Amount" in the order lines), and the user talks about what they see.
-                    outline = self._screen_outline(arguments["model"])
+                    outline = self._restricted_fields(arguments["model"]) + self._screen_outline(arguments["model"])
                 return text[:SCHEMA_TEXT_CAP - len(outline)] + outline
             structured = result.get("structuredContent") or {}
             hidden = COST_FIELDS.get(arguments.get("model"), ())
@@ -99,6 +103,44 @@ class AiAgentEngineRead(models.AbstractModel):
         if config["share_data"]:
             summary += "\n\nRESULT (also shown to the user):\n" + text[:SHARED_TEXT_CAP]
         return summary
+
+    @api.model
+    def _restricted_fields(self, model):
+        """Fields of the model this user may not read. Odoo leaves them out of the field list, so the AI would not know
+        they exist and would look for them in other models ("salary" in contracts). Their labels only, never values."""
+        Model = self.env[model]
+        hidden = [field for name, field in Model._fields.items()
+                  if field.groups and field.groups != "base.group_no_one"  # debug-mode fields are technical, not private
+                  and not name.startswith(RESTRICTED_SKIP_PREFIXES) and not SETTING_SECRET.search(name)
+                  and not Model._has_field_access(field, "read")]
+        if not hidden:
+            return ""
+        # All of them (an employee hides about 90 from non-HR users; Wage is near the end), with a safety cap.
+        names = ", ".join(f"{field._description_string(self.env)} ({field.name})" for field in hidden[:120])
+        return ("\n\nRESTRICTED FOR THIS USER (these fields exist, but Odoo's access rights do not let this user read "
+                f"them): {names}. If the user asks for one, show what they asked for without it and say that field is "
+                "restricted (e.g. to HR or administrators); never look for it in other models.")
+
+    @api.model
+    def _restricted_use(self, arguments):
+        """A filter, grouping, sort or total on a field this user may not read. Odoo refuses the whole query with
+        "not allowed to access <model> records", which reads as if the records were hidden: say what is restricted."""
+        model = arguments.get("model")
+        if not isinstance(model, str) or model not in self.env:
+            return None
+        Model = self.env[model]
+        listed = lambda key: [arguments[key]] if isinstance(arguments.get(key), str) else list(arguments.get(key) or [])  # noqa: E731
+        names = self._requested_fields({"groupby": listed("groupby"), "domain": self._domain(arguments),
+                                        "order": arguments.get("order")})
+        names += [str(a).split(":")[0] for a in listed("aggregates")]
+        for name in dict.fromkeys(names):
+            field = Model._fields.get(name)
+            if field is not None and not Model._has_field_access(field, "read"):
+                return _("The %(field)s field (%(name)s) of %(model)s is restricted for this user by Odoo's access "
+                         "rights, so it cannot be used to filter, group, sort or total. The user can still read "
+                         "%(model)s records without it: say that this field is restricted, not that the records are "
+                         "hidden.", field=field.string, name=name, model=self._model_label(model))
+        return None
 
     @api.model
     def _without_costs(self, tool, arguments, state):

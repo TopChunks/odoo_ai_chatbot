@@ -830,6 +830,9 @@ STYLE
         blocked = self._not_enabled(name, arguments)
         if blocked:
             return self._tool_not_enabled(state, step, call, blocked)
+        restricted = self._restricted_use(arguments)
+        if restricted:
+            return self._tool_failed(state, step, call, restricted)
         handlers = {
             "chart": lambda: self._tool_chart(arguments, state),
             "history": lambda: self._tool_history(arguments, config, state),
