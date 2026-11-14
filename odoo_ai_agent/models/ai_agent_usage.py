@@ -83,7 +83,7 @@ class AiAgentUsage(models.Model):
             "filters": {
                 "providers": [{"id": p.id, "name": p.name} for p in self.env["ai_agent.provider"].search([])],
                 "models": [
-                    {"id": m.id, "name": m.display_name}
+                    {"id": m.id, "name": m.display_name, "provider_id": m.provider_id.id}
                     for m in self.with_context(active_test=False).search([]).model_id
                 ],
                 "users": [{"id": u.id, "name": u.name} for u in self.search([]).user_id],

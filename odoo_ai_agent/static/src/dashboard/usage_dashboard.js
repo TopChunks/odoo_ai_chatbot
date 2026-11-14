@@ -116,7 +116,17 @@ export class AiAgentUsageDashboard extends Component {
 
     setFilter(name, value) {
         this.state[name] = value ? parseInt(value) : false;
+        if (name === "provider_id" && this.state.model_id && !this.models.some((m) => m.id === this.state.model_id)) {
+            this.state.model_id = false;
+        }
         this.load();
+    }
+
+    /** The models of the chosen provider only (all models when no provider is chosen). */
+    get models() {
+        const { provider_id } = this.state;
+        const models = this.state.data.filters.models;
+        return provider_id ? models.filter((m) => m.provider_id === provider_id) : models;
     }
 
     // ------------------------------------------------------------------

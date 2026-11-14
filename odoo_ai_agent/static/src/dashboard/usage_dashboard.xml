@@ -31,7 +31,7 @@
                             </select>
                             <select class="form-select form-select-sm w-auto" t-on-change="(ev) => this.setFilter('model_id', ev.target.value)">
                                 <option value="">All models</option>
-                                <option t-foreach="state.data.filters.models" t-as="m" t-key="m.id" t-att-value="m.id" t-att-selected="state.model_id === m.id" t-esc="m.name"/>
+                                <option t-foreach="models" t-as="m" t-key="m.id" t-att-value="m.id" t-att-selected="state.model_id === m.id" t-esc="m.name"/>
                             </select>
                             <select class="form-select form-select-sm w-auto" t-on-change="(ev) => this.setFilter('user_id', ev.target.value)">
                                 <option value="">All users</option>
