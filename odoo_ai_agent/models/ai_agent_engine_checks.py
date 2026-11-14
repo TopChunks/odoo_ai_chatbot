@@ -501,9 +501,31 @@ class AiAgentEngineChecks(models.AbstractModel):
                  apps=apps, what=what)
 
     @api.model
+    def _similar_models(self, model):
+        """Real models matching every word of a guessed name, in their technical name or label (whatsapp.template ->
+        tcs.whatsapp.template "WhatsApp Template"). Names only, no data; at most 6."""
+        words = [w for w in re.split(r"[._\s]+", (model or "").lower())
+                 if len(w) > 2 and w not in ("res", "base", "model", "models")]
+        if not words:
+            return self.env["ir.model"]
+        domain = [("transient", "=", False)]
+        for word in words:
+            domain += ["|", ("model", "ilike", word), ("name", "ilike", word)]
+        found = self.env["ir.model"].sudo().search(domain, limit=6)
+        return found.filtered(lambda m: m.model in self.env and m.model != model)
+
+    @api.model
     def _tool_not_installed(self, state, step, call, model):
         """Unknown model: find the app that provides it (from the model name or the user's words), and tell the user
         plainly whether it is turned off in Settings, not installed, or not available in this Odoo."""
+        similar = self._similar_models(model)
+        if similar:
+            # A guessed name for a model that exists under another name (a third-party app: whatsapp.template ->
+            # tcs.whatsapp.template). Its real name lets the next call get the usual "not enabled, how to enable".
+            return self._tool_failed(state, step, call, _(
+                "Unknown model: %(model)s. Models of this database that match: %(found)s. Call the tool again with "
+                "the right one (it may not be enabled for the AI yet; Odoo then says how to enable it).",
+                model=model, found=", ".join(f"{m.model} ({m.name})" for m in similar)))
         feature = self._missing_feature(model, state.get("question") or "")
         if not feature:
             return self._tool_failed(state, step, call, _(
