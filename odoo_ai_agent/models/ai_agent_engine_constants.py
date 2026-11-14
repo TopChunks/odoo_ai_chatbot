@@ -410,6 +410,20 @@ REFUSAL_REASON = re.compile(r"\b(?:access|rights?|permission|allowed|private|res
 RECORD_ID_MENTION = re.compile(r"\s*\((?:(?:[a-z]+ ){0,2}(?:ID|reference|ref\.?)|(?:lead|opportunity|order|quotation|invoice|"
                                r"bill|payment|product|contact|customer|vendor|partner|user|employee|task|project|"
                                r"transfer|picking|move|stage|record))\s*:?\s*#?\d+\)", re.IGNORECASE)
+# "sales order 76", "invoice #12", "lead ID 77": a record word followed by its database ID.
+RECORD_NUMBER = re.compile(
+    r"\b((?:sales |purchase |manufacturing )?(?:order|quotation|invoice|bill|opportunity|lead|contact|customer|vendor|"
+    r"product|employee|task|transfer|delivery|receipt|payment|ticket|record))\s+(?:ID\s+|#)?(\d+)\b", re.IGNORECASE)
+# Which models a record word names (checked in this order: "purchase order" before "order"); "record": any model.
+RECORD_WORD_MODELS = (
+    ("purchase order", ("purchase.order",)), ("manufacturing order", ("mrp.production",)),
+    ("order", ("sale.order",)), ("quotation", ("sale.order",)), ("invoice", ("account.move",)),
+    ("bill", ("account.move",)), ("payment", ("account.payment",)), ("opportunity", ("crm.lead",)),
+    ("lead", ("crm.lead",)), ("contact", ("res.partner",)), ("customer", ("res.partner",)),
+    ("vendor", ("res.partner",)), ("product", ("product.product", "product.template")),
+    ("employee", ("hr.employee",)), ("task", ("project.task",)), ("transfer", ("stock.picking",)),
+    ("delivery", ("stock.picking",)), ("receipt", ("stock.picking",)), ("ticket", ("helpdesk.ticket",)),
+)
 ASKS_FOR_IDS = re.compile(r"\bids?\b", re.IGNORECASE)
 # The answer check, applied in this order to every answer (AiAgentEngine._clean_answer). Each rule: name, pattern,
 # replacement, and when it applies: "always", "data" (the answer shows Odoo results), "complete" (every table shown

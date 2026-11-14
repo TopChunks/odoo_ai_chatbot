@@ -32,7 +32,7 @@ from odoo.addons.mcp_server.controllers import utils as mcp_utils
 from .ai_agent_provider import ProviderError
 
 from .ai_agent_engine_constants import (
-    ACCESS_RIGHTS_SCHEMA, ANSWER_RULES, APP_GATE_DIRECTORY, APP_GATE_FREE_KINDS, ASKS_FOR_IDS, BARE_URL,
+    ACCESS_RIGHTS_SCHEMA, ANSWER_RULES, APP_GATE_DIRECTORY, APP_GATE_FREE_KINDS, ASKS_FOR_IDS, BARE_URL, RECORD_NUMBER, RECORD_WORD_MODELS,
     BUSINESS_FLOW_SCHEMA, CALCULATE_SCHEMA, CARD_CLAIM, CHART_SCHEMA, COMPARE_INTENT, CONVERSATION_STATS_SCHEMA,
     DATA_TOOLS, DATA_USED,
     DATA_USED_NUDGE, ERROR_HELP_EXCEPTIONS, ERROR_SOURCE_PLAIN, ERROR_SOURCE_TECHNICAL, FILTERS_ARGUMENT,
@@ -927,6 +927,8 @@ STYLE
         """The answer check: the paid yes/no verdict, then ANSWER_RULES in order (see their comment)."""
         text = self._paid_verdict(state.get("question") or "", text or "")
         blocks = state.get("blocks") or []
+        if not ASKS_FOR_IDS.search(state.get("question") or ""):
+            text = self._ids_to_names(text, blocks)
         tables = [b for b in blocks if b.get("type") == "table" and not b.get("collapsed")]
         applies = {
             "always": True,
@@ -945,6 +947,31 @@ STYLE
             else:
                 text = pattern.sub(replacement, text)
         return text.strip()
+
+    @staticmethod
+    def _ids_to_names(text, blocks):
+        """"Sales order 76": with data sharing off the AI only knows record IDs, but the user sees the record's name
+        in the table under the answer. Swap the ID for that name in the text (the AI never gets it). Only IDs of
+        records shown in this answer, and only right after a record word, so "2 orders" or a year is untouched."""
+        names = {}  # (model, id) -> names shown
+        for block in blocks:
+            model = block.get("model")
+            if block.get("type") == "record" and block.get("record_id"):
+                names.setdefault((model, block["record_id"]), set()).add(str(block.get("display_name") or ""))
+            for row in block.get("rows") or []:
+                values = row.get("values") or {}
+                name = values.get("name") or values.get("display_name")
+                if isinstance(row.get("id"), int) and isinstance(name, str) and name:
+                    names.setdefault((model, row["id"]), set()).add(name)
+
+        def swap(match):
+            word, record_id = match.group(1).lower(), int(match.group(2))
+            models = next((m for w, m in RECORD_WORD_MODELS if w in word), ())
+            found = {n for (model, rid), shown in names.items() if rid == record_id and (not models or model in models)
+                     for n in shown if n}
+            return f"{match.group(1)} {found.pop()}" if len(found) == 1 else match.group(0)
+
+        return RECORD_NUMBER.sub(swap, text) if names else text
 
     @api.model
     def _post_answer(self, channel, text, error, state, config):

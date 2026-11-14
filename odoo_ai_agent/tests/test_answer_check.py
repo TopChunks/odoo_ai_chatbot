@@ -8,6 +8,7 @@ from odoo.tests import TransactionCase, tagged
 
 TABLE = {"type": "table", "rows": [{"values": {}}], "total": 1}
 MORE = {"type": "table", "rows": [{"values": {}}], "total": 80, "has_more": True}
+ORDER = {"type": "table", "model": "sale.order", "rows": [{"id": 76, "values": {"name": "TEST-S00110"}}], "total": 1}
 
 # (what it shows, the AI's text, the question, the blocks shown, data shared with the AI, the expected answer)
 CASES = [
@@ -69,6 +70,11 @@ CASES = [
      "the receipt moves to Ready.", "", [TABLE], False,
      "Here are the 5 overdue receipts, so you can plan the week. If the vendor confirms, the receipt moves to Ready."),
     ("no data shown: nothing removed", "I can't see the amounts.", "", [], False, "I can't see the amounts."),
+    # A record's database ID in the text: the name the user sees in the table instead.
+    ("record ID swapped for its name", "It belongs to sales order 76.", "Which order is it from?", [ORDER], False,
+     "It belongs to sales order TEST-S00110."),
+    ("ID of another record type kept", "Lead 76 is open.", "", [ORDER], False, "Lead 76 is open."),
+    ("count and year kept", "You have 2 orders from 2026.", "", [ORDER], False, "You have 2 orders from 2026."),
 ]
 
 
