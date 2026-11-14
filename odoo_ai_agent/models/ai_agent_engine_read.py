@@ -17,6 +17,11 @@ from .ai_agent_engine_constants import (
     SCHEMA_TEXT_CAP, SETTING_SECRET, SHARED_TEXT_CAP, TABLE_ROW_CAP,
 )
 
+# "Are there duplicates of X?": the fields that identify the same person, company or product.
+DUPLICATE_INTENT = re.compile(r"\b(?:duplicat\w*|same (?:contact|customer|vendor|company|person|product)s?|merge)\b",
+                              re.IGNORECASE)
+DUPLICATE_KEYS = ("email", "phone", "mobile", "vat", "company_registry", "default_code", "barcode", "work_email")
+
 # Chatter, activity, presence and login helpers: technical, not data a user asks for.
 RESTRICTED_SKIP_PREFIXES = ("activity_", "my_activity", "message_", "website_message", "rating_", "presence",
                             "is_in_call", "signup_", "totp")
@@ -556,10 +561,52 @@ class AiAgentEngineRead(models.AbstractModel):
             seen[values] = seen.get(values, 0) + 1
         repeated = sum(count for count in seen.values() if count > 1)
         if len(columns) < 2 or not repeated:
-            return ""
+            return self._shared_identifiers(model, rows, state)
         self._add_notice(state, _("%s rows show exactly the same values: they may be duplicate records.", repeated),
                          "info")
         return f" {repeated} rows show exactly the same values (the user was told they may be duplicate records)."
+
+    @api.model
+    def _shared_identifiers(self, model, rows, state):
+        """"Are there duplicate contacts for X?": records with different names but the same email, phone, tax ID,
+        code or barcode. Odoo states the clue itself (field names only, read with the user's rights), instead of the
+        AI asking the user to compare columns. A company and its own contact person are never paired."""
+        if not DUPLICATE_INTENT.search(state.get("question") or "") or len(rows) < 2:
+            return ""
+        Model = self.env[model]
+        keys = [f for f in DUPLICATE_KEYS if f in Model._fields and Model._has_field_access(Model._fields[f], "read")]
+        ids = [row["id"] for row in rows if isinstance(row.get("id"), int)][:20]
+        if not keys or len(ids) < 2:
+            return ""
+        try:
+            with self.env.cr.savepoint():
+                records = Model.browse(ids).exists()._filtered_access("read")
+                values = {r.id: {f: self._identifier(r[f]) for f in keys} for r in records}
+                parents = {r.id: r.parent_id.id for r in records} if "parent_id" in Model._fields else {}
+        except Exception:  # noqa: BLE001 - only a hint
+            return ""
+        pairs = []
+        for i, a in enumerate(records):
+            for b in records[i + 1:]:
+                if parents.get(a.id) == b.id or parents.get(b.id) == a.id:
+                    continue  # a company and its own contact person often share an email
+                same = [Model._fields[f]._description_string(self.env) for f in keys
+                        if values[a.id][f] and values[a.id][f] == values[b.id][f]]
+                if same:
+                    pairs.append(_("%(a)s and %(b)s have the same %(fields)s", a=a.display_name, b=b.display_name,
+                                   fields=_(" and ").join(same)))
+        if not pairs:
+            return ""
+        text = _("%s: they are likely duplicates.", "; ".join(pairs[:3]))
+        self._add_notice(state, text, "info")
+        return f" {text} (the user was told). Answer with this verdict; never ask the user to compare columns."
+
+    @staticmethod
+    def _identifier(value):
+        """An email, phone or code compared the way people write it: case, spaces and punctuation ignored."""
+        if not value or not isinstance(value, str):
+            return ""
+        return re.sub(r"[\s\-().+]", "", value).lower()
 
     @api.model
     def _linked_ids(self, model, rows, state):
