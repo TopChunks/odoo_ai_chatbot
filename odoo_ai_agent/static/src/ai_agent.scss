@@ -243,6 +243,15 @@
 }
 
 // Usage dashboard
+// One color per metric (the validated categorical palette), used as a tint so it works in light and dark mode.
+$o-ai-tones: (
+    blue: #2a78d6, orange: #eb6834, green: #1baf7a, amber: #eda100,
+    pink: #e87ba4, teal: #0f8a7e, purple: #6250d6, red: #e34948,
+);
+@each $name, $color in $o-ai-tones {
+    .o-ai-tone-#{$name} { --o-ai-tone: #{$color}; }
+}
+
 .o-ai-dash {
     background-color: $o-webclient-background-color;
 }
@@ -253,36 +262,174 @@
     padding: 1.25rem 1.5rem 2rem;
 }
 
+// Header band: title, period and filters on the brand gradient.
+.o-ai-dash-hero {
+    color: #fff;
+    border-radius: 1rem;
+    padding: 1.25rem 1.5rem;
+    background: linear-gradient(120deg, #714b67 0%, #5b4fbf 55%, #2a78d6 100%);
+    box-shadow: 0 10px 30px -12px rgba(91, 79, 191, 0.55);
+    h2 {
+        color: #fff;
+        font-weight: 700;
+    }
+    .form-select {
+        color: $o-main-text-color;
+        background-color: $o-view-background-color;
+        border: 0;
+        border-radius: 2rem;
+        min-width: 160px;
+        box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.25);
+    }
+}
+
+.o-ai-dash-heroIcon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 3rem;
+    height: 3rem;
+    border-radius: 0.85rem;
+    font-size: 1.6rem;
+    background-color: rgba(255, 255, 255, 0.18);
+}
+
+.o-ai-dash-heroSub {
+    opacity: 0.85;
+    font-size: 0.85rem;
+}
+
+.o-ai-dash-periods {
+    display: inline-flex;
+    padding: 0.2rem;
+    border-radius: 2rem;
+    background-color: rgba(255, 255, 255, 0.16);
+    .btn {
+        color: #fff;
+        border: 0;
+        border-radius: 2rem;
+        padding: 0.3rem 0.9rem;
+        &:hover {
+            background-color: rgba(255, 255, 255, 0.18);
+        }
+        &.o-active {
+            color: #5b4fbf;
+            font-weight: 600;
+            background-color: #fff;
+        }
+    }
+}
+
+.o-ai-dash-heroBtn {
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    border-radius: 2rem;
+    &:hover {
+        color: #5b4fbf;
+        background-color: #fff;
+    }
+}
+
 .o-ai-dash-card {
     background-color: $o-view-background-color;
-    border: 1px solid $border-color;
-    border-radius: 0.75rem;
-    padding: 1rem 1.1rem;
+    border: 1px solid rgba($border-color, 0.7);
+    border-radius: 1rem;
+    padding: 1.1rem 1.2rem;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 16px -6px rgba(0, 0, 0, 0.08);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    &:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05), 0 12px 28px -10px rgba(0, 0, 0, 0.18);
+    }
     h5 {
         font-size: 0.95rem;
         font-weight: 600;
-        margin-bottom: 0.75rem;
+        margin-bottom: 0.85rem;
     }
+}
+
+.o-ai-dash-cardTitle {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+}
+
+.o-ai-dash-titleIcon,
+.o-ai-dash-kpiIcon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border-radius: 0.6rem;
+    color: var(--o-ai-tone);
+    background-color: color-mix(in srgb, var(--o-ai-tone) 14%, transparent);
+}
+
+.o-ai-dash-titleIcon {
+    width: 1.8rem;
+    height: 1.8rem;
+    font-size: 0.85rem;
 }
 
 .o-ai-dash-kpis {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 0.75rem;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));  // 4 + 4 on a wide screen
+    gap: 1rem;
+}
+
+.o-ai-dash-kpi {
+    position: relative;
+    overflow: hidden;
+    // A thin bar in the metric's color across the top of the card.
+    &::before {
+        content: "";
+        position: absolute;
+        inset: 0 0 auto 0;
+        height: 4px;
+        background: linear-gradient(90deg, var(--o-ai-tone), color-mix(in srgb, var(--o-ai-tone) 35%, transparent));
+    }
+}
+
+.o-ai-dash-kpiIcon {
+    width: 2.25rem;
+    height: 2.25rem;
+    font-size: 1rem;
+}
+
+.o-ai-dash-kpiLabel {
+    font-size: 0.85rem;
+    font-weight: 500;
+    opacity: 0.75;
 }
 
 .o-ai-dash-kpiValue {
-    font-size: 1.6rem;
+    font-size: 1.85rem;
     font-weight: 700;
-    line-height: 1.2;
-    margin-bottom: 0.15rem;
+    line-height: 1.15;
+    margin-bottom: 0.35rem;
     font-variant-numeric: tabular-nums;
+}
+
+// Small rounded labels: trends and scores.
+.o-ai-dash-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.1rem 0.55rem;
+    border-radius: 2rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    &.o-good { color: #12805c; background-color: rgba(27, 175, 122, 0.15); }
+    &.o-mid { color: #9a6a00; background-color: rgba(237, 161, 0, 0.18); }
+    &.o-bad { color: #c0392b; background-color: rgba(227, 73, 72, 0.14); }
+    &.o-up, &.o-down { color: #5b4fbf; background-color: rgba(98, 80, 214, 0.12); }
+    &.o-none { font-weight: 500; opacity: 0.7; background-color: rgba($o-gray-500, 0.15); }
 }
 
 .o-ai-dash-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
-    gap: 0.75rem;
+    gap: 1rem;
 }
 
 .o-ai-dash-table {
@@ -290,19 +437,41 @@
     th {
         white-space: nowrap;
         font-weight: 600;
-        font-size: 0.85rem;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.02em;
+        opacity: 0.7;
     }
 }
 
+.o-ai-dash-rank {
+    width: 2.5rem;
+    font-size: 1.1rem;
+}
+
 .o-ai-dash-avatar {
-    width: 26px;
-    height: 26px;
+    width: 30px;
+    height: 30px;
     object-fit: cover;
+    box-shadow: 0 0 0 2px rgba(98, 80, 214, 0.25);
 }
 
 .o-ai-dash-progress {
-    width: 70px;
+    width: 80px;
     height: 6px;
+    border-radius: 3px;
+}
+
+.o-ai-dash-ok {
+    color: #12805c;
+    padding: 0.75rem 1rem;
+    border-radius: 0.75rem;
+    background-color: rgba(27, 175, 122, 0.1);
+}
+
+.o-ai-dash-emptyIcon {
+    font-size: 2.5rem;
+    color: #5b4fbf;
 }
 
 // Conversation list next to the chat (Discuss and the AI Agent app)

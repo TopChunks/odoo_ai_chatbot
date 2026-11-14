@@ -9,9 +9,25 @@ import { useService } from "@web/core/utils/hooks";
 
 // Validated categorical palette (fixed order; light and dark steps chosen per surface).
 const PALETTE = {
-    light: ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"],
+    light: ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#0f8a7e", "#6250d6", "#e34948"],
     dark: ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"],
 };
+
+/** A bar fill that fades from the series color (at the bar's end) to a lighter tint (at its base). */
+function gradient(color, horizontal) {
+    return (context) => {
+        const { ctx, chartArea } = context.chart;
+        if (!chartArea) {
+            return color; // first layout pass
+        }
+        const fill = horizontal
+            ? ctx.createLinearGradient(chartArea.left, 0, chartArea.right, 0)
+            : ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
+        fill.addColorStop(0, `${color}80`);
+        fill.addColorStop(1, color);
+        return fill;
+    };
+}
 
 function scheme() {
     return cookie.get("color_scheme") === "dark" ? "dark" : "light";
@@ -110,33 +126,33 @@ export class AiAgentUsageDashboard extends Component {
         const k = this.state.data.kpis;
         const p = k.previous;
         return [
-            { label: _t("Total cost"), value: formatCost(k.cost), delta: this.delta(k.cost, p.cost), icon: "fa-usd" },
+            { label: _t("Total cost"), value: formatCost(k.cost), delta: this.delta(k.cost, p.cost), icon: "fa-usd", tone: "blue" },
             {
                 label: _t("Tokens"),
                 value: formatCompact(k.tokens),
                 delta: this.delta(k.tokens, p.tokens),
-                icon: "fa-cubes",
+                icon: "fa-cubes", tone: "orange",
                 hint: _t("%(input)s in · %(output)s out", {
                     input: formatCompact(k.input_tokens),
                     output: formatCompact(k.output_tokens),
                 }),
             },
-            { label: _t("Questions"), value: formatCompact(k.questions), delta: this.delta(k.questions, p.questions), icon: "fa-comments-o" },
-            { label: _t("Active users"), value: k.users, delta: this.delta(k.users, p.users), icon: "fa-users" },
-            { label: _t("Cost per question"), value: formatCost(k.avg_cost), delta: this.delta(k.avg_cost, p.avg_cost), icon: "fa-calculator" },
+            { label: _t("Questions"), value: formatCompact(k.questions), delta: this.delta(k.questions, p.questions), icon: "fa-comments-o", tone: "green" },
+            { label: _t("Active users"), value: k.users, delta: this.delta(k.users, p.users), icon: "fa-users", tone: "amber" },
+            { label: _t("Cost per question"), value: formatCost(k.avg_cost), delta: this.delta(k.avg_cost, p.avg_cost), icon: "fa-calculator", tone: "pink" },
             {
                 label: _t("Answered"),
                 value: `${k.success_rate.toFixed(1)}%`,
                 delta: this.delta(k.success_rate, p.success_rate, true),
-                icon: "fa-check-circle-o",
+                icon: "fa-check-circle-o", tone: "teal",
                 good: true,
             },
-            { label: _t("Avg. answer time"), value: `${k.avg_duration.toFixed(1)} s`, delta: this.delta(k.avg_duration, p.avg_duration), icon: "fa-clock-o" },
+            { label: _t("Avg. answer time"), value: `${k.avg_duration.toFixed(1)} s`, delta: this.delta(k.avg_duration, p.avg_duration), icon: "fa-clock-o", tone: "purple" },
             {
                 label: _t("Helpful answers"),
                 value: k.helpful_rate === null ? "—" : `${k.helpful_rate.toFixed(0)}%`,
                 hint: _t("%s 👍/👎 votes", k.feedback_count),
-                icon: "fa-thumbs-o-up",
+                icon: "fa-thumbs-o-up", tone: "red",
             },
         ];
     }
@@ -206,10 +222,11 @@ export class AiAgentUsageDashboard extends Component {
             data: {
                 labels,
                 datasets: datasets.map((dataset, index) => ({
-                    borderRadius: 4,
+                    borderRadius: 6,
                     borderSkipped: "start",
                     maxBarThickness: 26,
-                    backgroundColor: colors[dataset.slot ?? index],
+                    backgroundColor: gradient(colors[dataset.slot ?? index], options.horizontal),
+                    hoverBackgroundColor: colors[dataset.slot ?? index],
                     ...dataset,
                 })),
             },
@@ -246,23 +263,23 @@ export class AiAgentUsageDashboard extends Component {
                 ],
                 { stacked: true, legend: true }
             ),
-            models: this.bar(byModel.map((m) => m.name), [{ label: _t("Cost"), data: byModel.map((m) => m.cost) }], {
+            models: this.bar(byModel.map((m) => m.name), [{ label: _t("Cost"), data: byModel.map((m) => m.cost), slot: 2 }], {
                 horizontal: true,
                 money: true,
             }),
             providers: this.bar(
                 byProvider.map((p) => p.name),
-                [{ label: _t("Tokens"), data: byProvider.map((p) => p.tokens) }],
+                [{ label: _t("Tokens"), data: byProvider.map((p) => p.tokens), slot: 3 }],
                 { horizontal: true }
             ),
-            users: this.bar(users.map((u) => u.name), [{ label: _t("Tokens"), data: users.map((u) => u.tokens) }], {
+            users: this.bar(users.map((u) => u.name), [{ label: _t("Tokens"), data: users.map((u) => u.tokens), slot: 4 }], {
                 horizontal: true,
             }),
             hours: this.bar(
                 data.hourly.map((_v, h) => `${String(h).padStart(2, "0")}h`),
-                [{ label: _t("Questions"), data: data.hourly }]
+                [{ label: _t("Questions"), data: data.hourly, slot: 6 }]
             ),
-            tools: this.bar(tools.map((t) => t.name), [{ label: _t("Calls"), data: tools.map((t) => t.count) }], {
+            tools: this.bar(tools.map((t) => t.name), [{ label: _t("Calls"), data: tools.map((t) => t.count), slot: 5 }], {
                 horizontal: true,
             }),
         };
