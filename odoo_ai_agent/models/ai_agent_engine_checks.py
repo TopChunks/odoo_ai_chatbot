@@ -713,6 +713,13 @@ class AiAgentEngineChecks(models.AbstractModel):
             whole word ("web" is not in "Website", "app" not in "Apply")."""
             return re.search(rf"\b{re.escape(term)}" + (r"\b" if len(term) < 4 else ""), text) is not None
 
+        words = [w for w in dict.fromkeys(re.findall(r"[^\W\d_]{3,}", query.casefold())) if w not in SETTING_STOPWORDS]
+
+        def exact(entry):
+            """The setting's name is exactly the user's words ("Warnings", not "Sale Warnings")."""
+            own = [w for w in re.findall(r"[^\W\d_]{3,}", entry["label"].casefold()) if w not in SETTING_STOPWORDS]
+            return bool(own) and own == words
+
         def score(entry):
             label, help_text = entry["label"].casefold(), entry["help"].casefold()
             # the section is a name the user sees and types ("Progressive Web App"): above the help text
@@ -724,6 +731,8 @@ class AiAgentEngineChecks(models.AbstractModel):
                 value = 0
             elif value and any(has(entry["app"].casefold(), term) for term in terms):
                 value += 2
+            if value and exact(entry):
+                value += 6  # asked for by its exact name: first, before longer names sharing the words
             return value
 
         found = sorted((e for e in catalog if score(e)), key=score, reverse=True)
@@ -732,7 +741,6 @@ class AiAgentEngineChecks(models.AbstractModel):
             found = [e for e in found if score(e) >= max(2, best / 2)][:3]
         # A setting is the answer only when its own name has most of the user's words: one word in a detail
         # ("link" in "Display Link QR-code" of Pay Invoices Online) is not "Link Tracker".
-        words = [w for w in dict.fromkeys(re.findall(r"[^\W\d_]{3,}", query.casefold())) if w not in SETTING_STOPWORDS]
 
         def hits(entry):
             links = "" if entry["fields"] else " ".join(entry["buttons"])  # a link setting is named by its link too
@@ -743,6 +751,15 @@ class AiAgentEngineChecks(models.AbstractModel):
         def named(entry):
             return hits(entry) * 2 >= len(words)
 
+        # The words are exactly an app's name ("CRM", "Time Off", "Accounting") and no setting's own name has those
+        # very words: the user means the app, not a setting in its section or with a word like it.
+        exact_app = self._module_named(query, exact=True)
+        # the full name, "on"/"off" included ("Time Off"), as whole words ("time" is not "timeout")
+        phrase = [w for w in re.findall(r"[^\W\d_]+", query.casefold())
+                  if w not in SETTING_STOPWORDS or w in ("on", "off")]
+        if exact_app and not any(all(re.search(rf"\b{re.escape(w)}\b", f"{e['label']} {e['parent']}".casefold())
+                                     for w in phrase) for e in found):
+            return exact_app
         if not any(hits(e) == len(words) for e in found):
             # No setting has all the words in its name: words that are an app's exact name ("Email Marketing",
             # "Link Tracker") are about that app, not about a setting that shares one word with it.
@@ -805,15 +822,19 @@ class AiAgentEngineChecks(models.AbstractModel):
                 "exactly where it is. Mention another match only if it may be what the user meant.")
 
     @api.model
-    def _module_named(self, query):
+    def _module_named(self, query, exact=False):
         """When the words name an app rather than a setting ("link tracker"): what Odoo knows about it, for the AI.
-        Any module (custom ones included) in any state, from Odoo's own module list; None when no app has that name."""
+        Any module (custom ones included) in any state, from Odoo's own module list; None when no app has that name.
+        exact: the words are the app's name and nothing more ("Time Off"; "turn on" and the like aside)."""
         words = set(re.findall(r"[^\W\d_]+", query.casefold()))
+        meaningful = words - SETTING_STOPWORDS
         best = None
         for module in self.env["ir.module.module"].sudo().search([]):
             name_words = re.findall(r"[^\W\d_]+", (module.shortdesc or "").casefold())
-            # every word of the app's name is in the question, and it is not a one-letter or empty name
-            if name_words and sum(len(w) for w in name_words) >= 4 and set(name_words) <= words:
+            if exact and not (meaningful and set(name_words) - SETTING_STOPWORDS == meaningful):
+                continue
+            # every word of the app's name is in the question, and it is not a one- or two-letter name
+            if name_words and sum(len(w) for w in name_words) >= 3 and set(name_words) <= words:
                 key = (len(name_words), module.application, module.state == "installed")
                 if best is None or key > best[0]:
                     best = (key, module)
