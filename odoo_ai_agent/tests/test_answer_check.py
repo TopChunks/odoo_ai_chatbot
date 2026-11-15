@@ -96,8 +96,8 @@ class TestAnswerCheck(TransactionCase):
         engine = self.env["ai_agent.engine"]
 
         def notes(question, start, end):
-            chart = {"type": "chart", "model": "res.partner",
-                     "domain": [["date", ">=", start], ["date", "<", end]]}
+            chart = {"type": "chart", "model": "account.move",
+                     "domain": [["invoice_date", ">=", start], ["invoice_date", "<", end]]}
             state = {"question": question, "blocks": [chart]}
             engine._fiscal_year_note(state)
             return [b["text"] for b in state["blocks"] if b.get("type") == "notice"]
