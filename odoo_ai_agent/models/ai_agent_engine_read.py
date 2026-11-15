@@ -505,6 +505,39 @@ class AiAgentEngineRead(models.AbstractModel):
         return value
 
     @api.model
+    def _currencies(self, model, domain, currency_fields):
+        """The currencies the amounts of these records are in (each monetary field has its currency field), as the
+        user may read them: [(id, name)]. Empty when they cannot be read."""
+        Model = self.env[model]
+        found = {}
+        for name in dict.fromkeys(currency_fields):
+            field = Model._fields.get(name)
+            if field is None or field.type != "many2one" or not Model._has_field_access(field, "read"):
+                continue
+            try:
+                with self.env.cr.savepoint():  # a domain the database rejects changes nothing
+                    for (currency,) in Model._read_group(domain or [], [name]):
+                        if currency:
+                            found[currency.id] = (currency.id, currency.name)
+            except Exception:  # noqa: BLE001 - the amounts are still shown, without their currency
+                _logger.debug("AI Agent: currencies of %s not read", model, exc_info=True)
+        return list(found.values())
+
+    @api.model
+    def _mixed_currencies(self, state, currencies, summed):
+        """Amounts in several currencies are never converted: the user is told, and so is the AI."""
+        if len(currencies) < 2:
+            return ""
+        names = ", ".join(sorted(name for _id, name in currencies))
+        text = (_("These amounts are in different currencies (%s). Odoo does not convert them, so totals add amounts "
+                  "of several currencies together.", names) if summed else
+                _("These amounts are in different currencies (%s): each shows its own currency; they are not "
+                  "converted.", names))
+        self._add_notice(state, text, level="info")
+        return (f" MIXED CURRENCIES ({names}, already shown to the user): the amounts are not converted"
+                + ("; a total or ranking adds amounts of different currencies, so say so" if summed else "") + ".")
+
+    @api.model
     def _block_table(self, arguments, structured, state, signature=None):
         model = structured.get("model")
         rows = (structured.get("records") or [])[:TABLE_ROW_CAP]
@@ -521,6 +554,23 @@ class AiAgentEngineRead(models.AbstractModel):
         rows = self._with_titles(model, rows)
         roles = self._same_name_roles(model, columns, rows) + self._order_status_columns(model, columns, rows, state)
         currency_field = next((c["currency_field"] for c in columns if c.get("currency_field")), None)
+        # Each amount with its own currency (₹318,600.00 is not more than $46,250.00), read by Odoo even when the
+        # AI did not ask for the currency field; an invoice's Total and its company-currency Total can differ.
+        money_fields = list(dict.fromkeys(c["currency_field"] for c in columns if c.get("currency_field")))
+        currencies = {}
+        if money_fields and rows:
+            Model = self.env[model]
+            readable = [f for f in money_fields
+                        if f in Model._fields and Model._has_field_access(Model._fields[f], "read")]
+            try:
+                with self.env.cr.savepoint():
+                    currencies = {r["id"]: r for r in Model.browse([row["id"] for row in rows if row.get("id")])
+                                  .read(readable)}
+            except Exception:  # noqa: BLE001 - the amounts are still shown, without their currency
+                _logger.debug("AI Agent: currencies of %s rows not read", model, exc_info=True)
+        mixed = self._mixed_currencies(state, list({
+            tuple(value) for record in currencies.values() for name, value in record.items()
+            if name in money_fields and value}), summed=False)
         ref = self._ai_add_result(state, {
             "type": "table",
             "id": uuid.uuid4().hex,
@@ -532,8 +582,11 @@ class AiAgentEngineRead(models.AbstractModel):
                 {
                     "id": row.get("id"),
                     "values": {c["name"]: self._cell(row.get(c["name"])) for c in columns},
-                    # The currency of monetary amounts, when the search returned it.
-                    "currency": self._cell(row.get(currency_field)) if currency_field else None,
+                    # The currency of monetary amounts (each amount column's own currency field).
+                    "currency": self._cell(row.get(currency_field) or currencies.get(row.get("id"), {}).get(
+                        currency_field)) if currency_field else None,
+                    "currencies": {name: self._cell(row.get(name) or currencies.get(row.get("id"), {}).get(name))
+                                   for name in money_fields} if money_fields else None,
                 }
                 for row in rows
             ],
@@ -557,7 +610,7 @@ class AiAgentEngineRead(models.AbstractModel):
             f"[{ref}] {total} {label} record(s) that this user can access match; {len(rows)} rows with the columns "
             f"{self._column_text(columns)}. Record IDs: {ids[:60]}.{self._own_records_note(model)}{linked}{more}{facts}"
             f"{self._exact_name(model, arguments, ids)}{archived}{self._duplicate_rows(model, columns, rows, state)}"
-            f"{roles}"
+            f"{roles}{mixed}"
         )
 
     @api.model
@@ -976,8 +1029,22 @@ class AiAgentEngineRead(models.AbstractModel):
                 column["label"] = screen_labels.get(column["name"], column["label"])
         linked = self._linked_ids(model, [data], state)
         data = self._with_x2many_names(columns, [dict(data)], state)[0]
+        # The card's amounts with their currency, like the record's form shows them.
+        money_fields = list(dict.fromkeys(c["currency_field"] for c in columns if c.get("currency_field")))
+        currencies = {}
+        if money_fields and data.get("id"):
+            Model = self.env[model]
+            readable = [f for f in money_fields
+                        if f in Model._fields and Model._has_field_access(Model._fields[f], "read")]
+            try:
+                with self.env.cr.savepoint():
+                    currencies = {name: self._cell(value) for name, value in
+                                  Model.browse(data["id"]).read(readable)[0].items() if name in readable}
+            except Exception:  # noqa: BLE001 - the amounts are still shown, without their currency
+                _logger.debug("AI Agent: currencies of a %s card not read", model, exc_info=True)
         ref = self._ai_add_result(state, {
             "type": "record",
+            "currencies": currencies,
             "id": uuid.uuid4().hex,
             "model": model,
             "model_label": label,
@@ -1026,6 +1093,21 @@ class AiAgentEngineRead(models.AbstractModel):
                                 "type": "float" if info.get("type") in ("monetary", "float") else info.get("type", "float")})
         domain = self._safe_domain(self._domain(arguments))
         row_domains = self._group_domains(model, groupby, domain)
+        # Sums of amounts: one currency is shown with its symbol; several are never added silently.
+        money = [spec for spec in aggregates if spec != "__count" and meta.get(spec.split(":")[0], {}).get("type")
+                 == "monetary" and spec.partition(":")[2] not in ("count", "count_distinct")]
+        currency, mixed = None, ""
+        if money and groups:
+            money_meta = self.env[model].fields_get([spec.split(":")[0] for spec in money],
+                                                    attributes=["currency_field"])
+            found = self._currencies(model, domain, [info.get("currency_field") for info in money_meta.values()
+                                                     if info.get("currency_field")])
+            if len(found) == 1:
+                currency = list(found[0])
+                for column in columns:
+                    if column["name"] in money:
+                        column["type"] = "monetary"
+            mixed = self._mixed_currencies(state, found, summed=True)
         ref = self._ai_add_result(state, {
             "type": "table",
             "id": uuid.uuid4().hex,
@@ -1037,14 +1119,16 @@ class AiAgentEngineRead(models.AbstractModel):
             "columns": columns,
             "rows": [{"values": {c["name"]: self._cell(group.get(c["name"])) for c in columns},
                       # The exact records behind this row, so the user can open them (like Odoo's pivot).
-                      "domain": row_domains.get(self._group_key(group, groupby))} for group in groups],
+                      "domain": row_domains.get(self._group_key(group, groupby)),
+                      "currency": currency} for group in groups],
             "total": len(groups),
             "grouped": True,
             "has_more": bool(structured.get("has_more")),  # more groups than shown (the list really is cut)
             "subtitle": self._scope_text(model, domain, state.get("filter_labels", {}).get(signature)),
             # How it was computed, so present can turn it into a native graph or pivot.
             "spec": {"model": model, "groupby": groupby, "aggregates": aggregates,
-                     "domain": [list(t) if isinstance(t, tuple) else t for t in domain]},
+                     "domain": [list(t) if isinstance(t, tuple) else t for t in domain],
+                     "order": arguments.get("order") or None},  # a chart of it is sorted the same way
         }, signature)
         keys = []
         for group in groups[:40]:
@@ -1073,12 +1157,12 @@ class AiAgentEngineRead(models.AbstractModel):
                         f"are empty.{self._other_users_hidden(model, arguments, state)}")
             matching = f"{count} matching" if count is not None else "the matching"
             return (f"[{ref}] Overall totals of {matching} {label} records (records this user can access) with "
-                    f"the columns {self._column_text(columns)}.")
+                    f"the columns {self._column_text(columns)}.{mixed}")
         complete = "" if structured.get("has_more") else (
             f" This is the complete result: all {len(groups)} groups, nothing was cut off; do not say the list is "
             "capped or limited.")
         return (f"[{ref}] {len(groups)} group(s) of {label} (records this user can access) with the columns "
-                f"{self._column_text(columns)}.{key_text}{more}{complete}")
+                f"{self._column_text(columns)}.{key_text}{more}{complete}{mixed}")
 
     @api.model
     def _block_attachments(self, structured, state, signature=None):

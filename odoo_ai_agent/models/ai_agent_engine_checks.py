@@ -20,7 +20,7 @@ from odoo.addons.mcp_server.controllers import utils as mcp_utils
 from odoo.addons.mcp_server.tools.smart_fields import is_sensitive_field_name
 
 from .ai_agent_engine_constants import (
-    APP_GATE_NOT_PARENTS, COMPARE_INTENT, CONVERSATION_SCORE_TEXT, COST_FIELDS, COST_GROUPS, COST_HIDDEN,
+    APP_GATE_NOT_PARENTS, BUSINESS_DATE_FIELDS, COMPARE_INTENT, CONVERSATION_SCORE_TEXT, COST_FIELDS, COST_GROUPS, COST_HIDDEN,
     FIELD_ACCESS_ERROR, FORM_TAB_VIEW_CAP, HIGHLIGHT_CLAIM, LIMIT_WORDS, LOWEST,
     OPERATION_CHECKBOXES, PLAIN_TOTAL, REVENUE_WORDS, SCHEMA_TOOLS, SCREEN_OUTLINE_CAP, SETTING_SECRET,
     SETTING_STOPWORDS, SUPERLATIVE, TAX_INCLUDED, UNTAXED_PAIRS,
@@ -73,9 +73,32 @@ class AiAgentEngineChecks(models.AbstractModel):
                 who = tied[0] if len(tied) == 1 else _("%(first)s and %(last)s, tied", first=", ".join(tied[:-1][:3]),
                                                         last=tied[-1])
                 label = block.get("measure_label") or _("Count")
-                heading = _("Lowest %s", label) if lowest else _("Highest %s", label)
+                heading = (_("Lowest %s", label) if lowest else _("Highest %s", label)) + self._period_label(block)
                 self._add_notice(state, f"{heading}: {who} ({self._number(value)}).", "info", top=True)
                 return
+
+    @api.model
+    def _period_label(self, block):
+        """The period a highlighted figure covers, so the user knows which data it is: ' (all time)' when no date was
+        filtered, else ' (01 Apr 2026 – 31 Mar 2027)'. 'All time' only for records that happen on a business date
+        (orders, invoices, the sales analysis); '' for the rest (employees per department are not a period)."""
+        model = block.get("model")
+        if not isinstance(model, str) or model not in self.env:
+            return ""
+        domain = block.get("domain") or (block.get("spec") or {}).get("domain") or []
+        for low, high in self._date_ranges(model, domain).values():
+            show = lambda day: day.strftime("%d %b %Y")  # noqa: E731
+            if low and high:
+                return f" ({show(low)} – {show(high)})"
+            return _(" (from %s)", show(low)) if low else _(" (until %s)", show(high))
+        fields = self.env[model]._fields
+        if any(isinstance(term, (list, tuple)) and len(term) == 3 and isinstance(term[0], str)
+               and term[0].split(".")[0] in fields and fields[term[0].split(".")[0]].type in ("date", "datetime")
+               for term in domain):
+            return ""  # filtered on a date it could not read: never claim "all time"
+        dated = any(name in fields and fields[name].type in ("date", "datetime") and fields[name].store
+                    for name in BUSINESS_DATE_FIELDS)
+        return _(" (all time)") if dated else ""
 
     @staticmethod
     def _number(value):
@@ -170,6 +193,7 @@ class AiAgentEngineChecks(models.AbstractModel):
         who = tied[0] if len(tied) == 1 else _("%(first)s and %(last)s, tied", first=", ".join(tied[:-1][:3]),
                                                 last=tied[-1])
         heading = title or (_("Lowest %s", column["label"]) if lowest else _("Highest %s", column["label"]))
+        heading += self._period_label(block)  # "Highest Units sold (all time)": which data it covers
         self._add_notice(state, f"{heading}: {who} ({shown}{suffix}).", "info", top=True)
         return True
 

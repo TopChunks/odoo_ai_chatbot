@@ -125,6 +125,10 @@ REVENUE_WORDS = re.compile(r"\b(revenues?|turnover|income|earn(ed|ings|s)?|net s
 TAX_INCLUDED = re.compile(r"\b(with|incl(uding|\.)?|plus) (the )?tax(es)?\b|\btax(es)? incl|\bgross\b|"
                           r"\bgrand total\b|\btotal amounts?\b|\bamounts? (total|due|to pay)\b|\binvoiced (total|amount)\b",
                           re.IGNORECASE)
+# The date a business record happens on (an order, an invoice, a sale in the analysis): a figure over such records
+# without a date filter covers all time, and says so. Records without one (employees) are not about a period.
+BUSINESS_DATE_FIELDS = ("date_order", "invoice_date", "date", "date_planned", "date_approve", "date_done",
+                        "date_closed", "scheduled_date")
 PLAIN_TOTAL = re.compile(r"\btotal\b", re.IGNORECASE)
 # The user already said which year they mean: no fiscal-year note under the answer.
 FISCAL_WORDS = re.compile(r"\b(fiscal|financial|calendar|fy)\b", re.IGNORECASE)
@@ -378,6 +382,11 @@ NO_CHART = re.compile(r"\bnothing to (?:chart|plot|draw)\b", re.IGNORECASE)
 # "I accidentally displayed a first chart...": about the AI's own tool calls, not the user's data.
 MISTAKE = re.compile(r"\s*[^.!?\n]*(?:\b(?:accidentally|by mistake|mistakenly)\b|\b(?:presented|showed|displayed|"
                      r"appeared|drew|ran|tables?|charts?)\b[^.!?\n]*\btwice\b)[^.!?\n]*[.!?]", re.IGNORECASE)
+# "This is the same ranking as the previous answer": the AI never compares answers (by revenue and by units differ),
+# and the user sees both; the unchecked claim goes. Comparisons in the data itself ("same as last month") stay.
+SAME_AS_BEFORE = re.compile(r"\s*[^.!?\n]*\bsame\s+(?:ranking|order|list|results?|products|figures|numbers|top \d+)\b"
+                            r"[^.!?\n]*\b(?:previous|earlier|above|before|prior|last (?:answer|one|chart|table))\b"
+                            r"[^.!?\n]*[.!?]", re.IGNORECASE)
 # "I should correct my earlier note: the filter..." when there was no earlier note: only the opening words go.
 CORRECTION = re.compile(r"\b(?:I )?(?:should|must|need to|want to) correct my (?:earlier|previous) \w+[:,.]\s*(\w)",
                         re.IGNORECASE)
@@ -454,6 +463,7 @@ ANSWER_RULES = (
     ("no record IDs", RECORD_ID_MENTION, "", "always"),
     ("no talk about its own steps", MISTAKE, "", "data"),
     ("no correction of a note that never was", CORRECTION, lambda m: m.group(1).upper(), "data"),
+    ("no unchecked 'same ranking as before'", SAME_AS_BEFORE, "", "data"),
     ("no 'list is capped' for a complete list", CAPPED, "", "complete"),
     ("no 'I cannot see the values'", CANT_SEE, "", "private"),
     ("no 'check it yourself'", YOURSELF, "", "private"),

@@ -3,6 +3,7 @@
 
 import copy
 import json
+import re
 import uuid
 
 from odoo import _, api, fields, models
@@ -469,6 +470,19 @@ class AiAgentEnginePresent(models.AbstractModel):
         def label_of(aggregate):
             return labels.get(aggregate.lower()) or by_name.get(aggregate, {}).get("label") or aggregate
 
+        # The chart shows what the result shows: sorted as it was sorted by this measure ("highest first"), and only
+        # its own groups when it kept the top N ("top 10 of 37"), instead of every group in alphabetical order.
+        domain, order, subtitle = list(spec["domain"]), None, source.get("subtitle") or ""
+        sort = re.match(r"\s*([\w.:]+)(?:\s+(asc|desc))?", str(spec.get("order") or ""), re.IGNORECASE)
+        if sort and sort.group(1) in (chosen, field_of(chosen)):
+            order = (sort.group(2) or "asc").upper()
+        first = groupby[0]
+        if source.get("has_more") and len(groupby) == 1 and ":" not in first:
+            keys = [value[0] if isinstance(value, (list, tuple)) else value
+                    for value in (row["values"].get(first) for row in source["rows"])]
+            domain.append([first, "in", keys])
+            subtitle = " · ".join(part for part in (subtitle, _("Top %s only", len(keys))) if part)
+
         return {
             "type": "chart",
             "id": uuid.uuid4().hex,
@@ -483,11 +497,11 @@ class AiAgentEnginePresent(models.AbstractModel):
             # A pivot shows every measure of the result side by side.
             "measures": [field_of(a) for a in aggregates] if view == "pivot" else [field_of(chosen)],
             "measure_labels": [label_of(a) for a in aggregates] if view == "pivot" else [label_of(chosen)],
-            "domain": spec["domain"],
-            "order": None,
+            "domain": domain,
+            "order": order,
             "stacked": False,
             "cumulative": False,
-            "subtitle": source.get("subtitle"),
+            "subtitle": subtitle,
         }
 
     # ------------------------------------------------------------------
@@ -605,6 +619,12 @@ class AiAgentEnginePresent(models.AbstractModel):
                    "the full total: tell the user, and suggest a bar chart if they want every group."
                    if all_groups > len(groups) else "")
         same = json.dumps(scope_domain, default=str, ensure_ascii=False)
+        mixed = ""
+        if measure != "__count" and meta.get(measure, {}).get("type") == "monetary":
+            # Bars that add amounts of several currencies: never silently (Odoo does not convert them).
+            currency_field = Model.fields_get([measure], attributes=["currency_field"])[measure].get("currency_field")
+            if currency_field:
+                mixed = self._mixed_currencies(state, self._currencies(model, domain, [currency_field]), summed=True)
         return (f"A {chart_type} chart of {measure_label} by {', '.join(group_labels)} on {label} "
-                f"({len(groups)} groups) is shown to the user.{partial}{shared} If the user asks for a total of "
+                f"({len(groups)} groups) is shown to the user.{partial}{shared}{mixed} If the user asks for a total of "
                 f"this chart, use aggregate_records on {model} with exactly this domain: {same}.")

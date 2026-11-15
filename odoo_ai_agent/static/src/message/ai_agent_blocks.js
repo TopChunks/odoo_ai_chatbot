@@ -21,7 +21,7 @@ const ROWS_PREVIEW = 10;
  *
  * @param {any} value raw value as Odoo's search_read returns it
  * @param {{ type: string, selection?: [string, string][] }} column
- * @param {{ currency?: [number, string] }} [row]
+ * @param {{ currency?: [number, string], currencies?: Object<string, [number, string]> }} [row]
  */
 export function formatCell(value, column, row = {}) {
     if (Array.isArray(value)) {
@@ -54,7 +54,10 @@ export function formatCell(value, column, row = {}) {
             case "datetime":
                 return formatDateTime(deserializeDateTime(value));
             case "monetary":
-                return formatMonetary(value, { currencyId: row.currency?.[0] });
+                // The amount's own currency field (an invoice's Total and its company-currency Total can differ).
+                return formatMonetary(value, {
+                    currencyId: (row.currencies?.[column.currency_field] || row.currency)?.[0],
+                });
             case "float":
                 return formatFloat(value, { digits: [false, 2] });
             case "integer":
@@ -211,7 +214,8 @@ export class AiAgentRecord extends Component {
         const tab = Boolean(this.props.block.tab);
         return (this.props.block.fields || [])
             .map((field) => {
-                const text = formatCell(field.value, field);
+                // Amounts with the record's own currency (the card's currencies, read by Odoo).
+                const text = formatCell(field.value, field, { currencies: this.props.block.currencies });
                 return { ...field, text: text === "" && tab ? "—" : text };
             })
             .filter((field) => field.text !== "");

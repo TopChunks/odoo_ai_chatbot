@@ -15,6 +15,7 @@ from lxml import etree
 
 from odoo import _, api, fields, models
 from odoo.exceptions import AccessError, UserError
+from odoo.tools import date_utils
 from odoo.tools.safe_eval import datetime as safe_datetime
 from odoo.tools.safe_eval import dateutil as safe_dateutil
 from odoo.tools.safe_eval import safe_eval
@@ -779,7 +780,11 @@ class AiAgentEngineScope(models.AbstractModel):
             if not field or field.type not in ("date", "datetime") or operator not in (">=", ">", "<=", "<"):
                 continue
             try:
-                if field.type == "datetime" and len(str(value)) > 10:
+                if not re.match(r"\d+-", str(value)):
+                    # Odoo's own relative dates ("-365d", "today", "=1d"): read as Odoo reads them, in the user's tz
+                    moment = date_utils.parse_date(str(value), self.with_context(tz=self.env.user.tz or "UTC").env)
+                    day = moment.date() if isinstance(moment, datetime.datetime) else moment
+                elif field.type == "datetime" and len(str(value)) > 10:
                     moment = fields.Datetime.to_datetime(str(value)[:19])
                     day = fields.Datetime.context_timestamp(
                         self.with_context(tz=self.env.user.tz or "UTC"), moment).date()

@@ -37,6 +37,12 @@ CASES = [
      "The customer was contacted twice this week."),
     ("no earlier note", "The chart is below. I should correct my earlier note: it counts confirmed orders.", "",
      [TABLE], False, "The chart is below. It counts confirmed orders."),
+    ("same ranking removed", "Here are the top 10 products by units sold. This is the same ranking as the previous "
+     "answer.", "Best sellers by units sold", [TABLE], False, "Here are the top 10 products by units sold."),
+    ("same as last month kept", "Sales this month are the same as last month.", "", [TABLE], False,
+     "Sales this month are the same as last month."),
+    ("same customer kept", "The same customer ordered twice before.", "", [TABLE], False,
+     "The same customer ordered twice before."),
     # "The list is capped": only when the table really is complete.
     ("capped removed when complete", "Here are 3 orders. The list is capped at 80 rows.", "", [TABLE], False,
      "Here are 3 orders."),
@@ -197,6 +203,17 @@ class TestAnswerCheck(TransactionCase):
             with self.subTest(question):
                 args, note = run("aggregate_records", question, aggregates=["amount_total:sum"])
                 self.assertEqual((args["aggregates"], note), (["amount_total:sum"], ""))
+
+    def test_mixed_currencies(self):
+        """Amounts in one currency: no note. Several: a note, which says totals add them when they are summed."""
+        engine = self.env["ai_agent.engine"]
+        state = {"blocks": [], "notices": []}
+        self.assertEqual(engine._mixed_currencies(state, [(1, "USD")], summed=True), "")
+        self.assertFalse(state["blocks"])
+        self.assertIn("not converted", engine._mixed_currencies(state, [(1, "USD"), (20, "INR")], summed=False))
+        self.assertIn("each shows its own currency", state["blocks"][-1]["text"])
+        engine._mixed_currencies(state, [(1, "USD"), (20, "INR")], summed=True)
+        self.assertIn("totals add amounts of several currencies", state["blocks"][-1]["text"])
 
     def test_find_setting_names_an_app(self):
         """Words that are an app's name are about the app: never a setting sharing one word, never its card."""
