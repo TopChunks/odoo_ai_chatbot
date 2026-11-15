@@ -72,6 +72,15 @@ class AiAgentEngineRead(models.AbstractModel):
                 state.setdefault("filter_labels", {})[signature] = labels
             for key in ("screen", "filters", "period"):
                 arguments.pop(key, None)
+        tab = arguments.pop("tab", None)
+        form_tab = None
+        if name == "get_record" and tab and isinstance(arguments.get("model"), str) and arguments["model"] in self.env:
+            # "Alex's Preferences": the fields of that tab as this user sees them, chosen by Odoo, not guessed.
+            form_tab = self._form_tab(arguments["model"], arguments.get("record_id"), tab)
+            if not form_tab["fields"]:
+                buttons = f" Its buttons: {', '.join(form_tab['buttons'])}." if form_tab["buttons"] else ""
+                return f"The '{form_tab['title']}' tab of this record shows no fields to this user.{buttons} Say so."
+            arguments["fields"] = [field_name for field_name, _label in form_tab["fields"]]
         left_out = self._without_costs(tool, arguments, state)
         sort_after = []
         dropped = self._drop_unsortable(arguments, sort_after)
@@ -111,7 +120,13 @@ class AiAgentEngineRead(models.AbstractModel):
             if sort_after and state["blocks"] and state["blocks"][-1].get("type") == "table":
                 dropped = self._sort_rows(state["blocks"][-1], sort_after, dropped)
         elif name == "get_record":
-            summary = self._block_record(arguments, structured, state, signature)
+            if form_tab:
+                record = structured.get("record") or {}  # in screen order
+                if record.get("id") and not record.get("display_name"):  # the card's title: not one of the tab's fields
+                    record["display_name"] = self.env[arguments["model"]].browse(record["id"]).display_name
+                structured["record"] = {key: record[key] for key in ["id", "display_name", *arguments["fields"]]
+                                        if key in record}
+            summary = self._block_record(arguments, structured, state, signature, form_tab)
         elif name == "aggregate_records":
             summary = self._block_groups(arguments, structured, state, signature)
         elif name == "list_record_attachments":
@@ -950,11 +965,15 @@ class AiAgentEngineRead(models.AbstractModel):
                 + "; ".join(parts) + ".")
 
     @api.model
-    def _block_record(self, arguments, structured, state, signature=None):
+    def _block_record(self, arguments, structured, state, signature=None, form_tab=None):
         model = arguments.get("model")
         data = structured.get("record") or {}
         label = self._model_label(model)
         columns = self._columns(model, [k for k in data if k not in ("id", "display_name")])
+        if form_tab:
+            screen_labels = dict(form_tab["fields"])
+            for column in columns:
+                column["label"] = screen_labels.get(column["name"], column["label"])
         linked = self._linked_ids(model, [data], state)
         data = self._with_x2many_names(columns, [dict(data)], state)[0]
         ref = self._ai_add_result(state, {
@@ -965,8 +984,16 @@ class AiAgentEngineRead(models.AbstractModel):
             "record_id": data.get("id"),
             "display_name": data.get("display_name") or "",
             "fields": [dict(column, value=self._cell(data.get(column["name"]))) for column in columns],
+            **({"tab": form_tab["title"]} if form_tab else {}),
         }, signature)
         empty = "" if state.get("share_data") else self._empty_columns(columns, [data])
+        if form_tab:
+            buttons = (f" Buttons on this tab: {', '.join(form_tab['buttons'])} (actions, not values)."
+                       if form_tab["buttons"] else "")
+            return (f"[{ref}] The '{form_tab['title']}' tab of the {label} record (ID {data.get('id')}) as a card: "
+                    f"exactly the fields this user sees on that tab, in screen order: "
+                    f"{', '.join(c['label'] for c in columns)}. Those fields are the answer; empty ones are shown as "
+                    f"not set.{buttons}{linked}{empty}")
         return (f"[{ref}] The {label} record (ID {data.get('id')}) as a card with the fields "
                 f"{', '.join(c['label'] for c in columns)}.{linked}{empty}")
 

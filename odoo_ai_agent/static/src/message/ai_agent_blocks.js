@@ -205,8 +205,13 @@ export class AiAgentRecord extends Component {
     }
 
     get fields() {
+        // A tab of the form ("Preferences") is shown whole, like on the screen: an empty field is part of the answer.
+        const tab = Boolean(this.props.block.tab);
         return (this.props.block.fields || [])
-            .map((field) => ({ ...field, text: formatCell(field.value, field) }))
+            .map((field) => {
+                const text = formatCell(field.value, field);
+                return { ...field, text: text === "" && tab ? "—" : text };
+            })
             .filter((field) => field.text !== "");
     }
 

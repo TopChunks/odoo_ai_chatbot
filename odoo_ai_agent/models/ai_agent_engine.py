@@ -40,7 +40,7 @@ from .ai_agent_engine_constants import (
     GET_FILTERS_SCHEMA, HISTORY_MESSAGES, HISTORY_RECORD_CAP, HISTORY_SCHEMA, MODEL_LIST_CAP, NO_CHART,
     NOT_ENABLED_CLAIM, NOT_ENABLED_NUDGE, PERIOD_ARGUMENT, PRESENT_SCHEMA, PROGRESS_LABELS, RAW_TAG, RECORD_ID_MENTION,
     REFERS_EARLIER, REFERS_SHOWN, REFERS_SHOWN_NUDGE, REFUSAL_REASON, SCHEMA_TOOLS, SCREEN_ARGUMENT, SETTINGS_SCHEMA,
-    SHARED_ONLY_TOOLS, SHOW_APP_SCHEMA, TABLE_ROW_CAP, TIME_MARGIN, WRITE_TOOLS, normalize_schema,
+    SHARED_ONLY_TOOLS, SHOW_APP_SCHEMA, TAB_ARGUMENT, TABLE_ROW_CAP, TIME_MARGIN, WRITE_TOOLS, normalize_schema,
 )
 
 try:
@@ -298,6 +298,9 @@ class AiAgentEngine(models.AbstractModel):
                 schema["properties"]["screen"] = SCREEN_ARGUMENT
                 schema["properties"]["filters"] = FILTERS_ARGUMENT
                 schema["properties"]["period"] = PERIOD_ARGUMENT
+            if name == "get_record":
+                # A tab of the form ("Preferences"): Odoo picks the fields shown there for this user.
+                schema["properties"]["tab"] = TAB_ARGUMENT
             if name == "aggregate_records":
                 # Overall totals (one row) need no grouping; the engine computes them itself.
                 schema["required"] = [key for key in schema.get("required") or [] if key != "groupby"]
@@ -520,6 +523,7 @@ CALENDAR (computed by Odoo for this user; both ends included): {calendar}. For r
 SCOPE
 - You only help with Odoo: the data in this database and how to use Odoo's apps.
 - If a request is not about Odoo (general knowledge, news, sports, weather, coding unrelated to Odoo, personal advice, jokes, writing unrelated texts...), do not answer it and do not call tools. Reply politely in one or two sentences that you can only help with Odoo and its data. Add no links.
+- "Where is X", "how do I enable X" or "is there X" about a feature, option, app or screen: call find_setting first (it also says when X is an app; then use show_app) and answer from what it finds. Never say X is not in the database, not a setting or not available without checking.
 - "How do I…" and "where is…" questions about Odoo may be answered from your knowledge of Odoo {release.major_version}, in a few short steps. If the steps use a feature that an app's settings can switch off (Leads in CRM, product variants, units of measure, lots and serial numbers, multi-currency, analytic accounting...), call find_setting for it first: when it is off, your first sentence says it is off and where to switch it on (App > Configuration > Settings > option), before any steps; when it is on, say nothing about the setting (not even that it is on).
 - Links: do not add documentation or forum links by default. Add one link to https://www.odoo.com/documentation/{release.major_version}/ only when the user asks for documentation, or when a how-to needs more than a few steps to explain. Never add links to data answers or to "I can't do that" answers.
 
@@ -533,7 +537,7 @@ DATA YOU MAY USE (technical name (label): what the AI may do):
 HOW TO USE THE TOOLS
 {flow_instruction}- Check field names with get_fields before filtering or grouping on a field you are not sure exists. Never guess field names or selection values.
 - search_records for lists: pick 4 to 8 useful columns in 'fields', a sensible 'order', and limit at most {TABLE_ROW_CAP}.
-- get_record for the details of one record (pass the 6 to 12 'fields' that matter); aggregate_records for counts, sums and averages per group; show_chart for any chart or visual.
+- get_record for the details of one record (pass the 6 to 12 'fields' that matter, or 'tab' when the user names a tab of its form); aggregate_records for counts, sums and averages per group; show_chart for any chart or visual.
 - For arithmetic involving values from different fields or results (ratios, rates, % change, margins, or days between dates), use calculate on the results. However, when a model already has a stored or computed field representing the required measurement, use aggregate_records directly for its sum or average instead of calculating it again. Never invent field names.
 - Average days to close of opportunities: aggregate day_close:avg (it exists on crm.lead); never compute date differences yourself.
 - When the user compares two things (two customers, two links, two products), the answer includes the difference: calculate mode total ('a - b') on their figures. Shortages and remaining quantities (demand vs reserved, ordered vs delivered, planned vs consumed) need calculate mode column ('demand - reserved'); for consumption, list every component line with its planned and consumed quantity, not only the finished ones. Manufacturing orders waiting for components: also list their component lines that are not reserved yet (stock.move with raw_material_production_id in those orders and state not assigned, done or cancel), with demand and reserved quantity, so the user sees what is missing.

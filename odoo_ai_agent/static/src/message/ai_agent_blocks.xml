@@ -164,7 +164,7 @@
             <div class="o-ai-agent-cardHeader">
                 <i class="fa fa-id-card-o me-2 text-muted"/>
                 <span class="fw-bold text-truncate" t-esc="props.block.display_name"/>
-                <span class="text-muted ms-2 small text-nowrap" t-esc="props.block.model_label"/>
+                <span class="text-muted ms-2 small text-nowrap" t-esc="props.block.tab ? props.block.model_label + ' · ' + props.block.tab : props.block.model_label"/>
                 <div class="ms-auto d-flex gap-1">
                     <button class="btn btn-sm btn-light" title="Open in Odoo" t-on-click="open"><i class="fa fa-external-link"/></button>
                     <BlockExport message="props.message" block="props.block"/>

@@ -394,9 +394,10 @@ class AiAgentEngineScope(models.AbstractModel):
             found = Menu.search([("action", "!=", False)]).filtered(
                 lambda m: words and words in " ".join((m.complete_name or "").casefold().replace("/", " ").split()))
             hidden = root_of(found[:1]) if found else hidden
+        if hidden and not self._developer_mode() and hidden.id in self._visible_menus(True):
+            # Installed and allowed, but Odoo shows it only in developer mode (Link Tracker): for administrators too.
+            return self._developer_mode_text(hidden.name)
         if hidden and not self._is_admin():
-            if not self._developer_mode() and hidden.id in self._visible_menus(True):
-                return self._developer_mode_text(hidden.name)  # the user has access: Odoo only hides it
             return _("You don't have access to %s, so I can't open it. An administrator can give you access in "
                      "Settings > Users.", hidden.name)
         if wanted and not hidden:

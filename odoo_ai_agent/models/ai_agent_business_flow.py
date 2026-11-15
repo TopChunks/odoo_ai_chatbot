@@ -185,34 +185,35 @@ class AiAgentBusinessFlow(models.Model):
         return [(keys, words) for words, keys in by_words.items()]
 
     @api.model
-    def _words(self, model, node, negate, by_state):
-        """`node` (or its opposite when negate) in plain words, leaving out what the stage list already says."""
+    def _words(self, model, node, negate, by_state, parent=None):
+        """`node` (or its opposite when negate) in plain words, leaving out what the stage list already says.
+        `parent`: the model `parent.` refers to in a list column's rule (the order of an order line)."""
         if by_state and "state" in {n.id for n in ast.walk(node) if isinstance(n, ast.Name)} and not any(
                 isinstance(n, ast.Name) and n.id != "state" for n in ast.walk(node)):
             return ""
         if isinstance(node, ast.Constant):
             return ""
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
-            return self._words(model, node.operand, not negate, by_state)
+            return self._words(model, node.operand, not negate, by_state, parent)
         if isinstance(node, ast.BoolOp):
             joiner = _(" and ") if isinstance(node.op, ast.Or) == negate else _(" or ")
             other = _(" or ") if joiner == _(" and ") else _(" and ")
-            parts = [self._words(model, value, negate, by_state) for value in node.values]
+            parts = [self._words(model, value, negate, by_state, parent) for value in node.values]
             parts = [f"({part})" if other in part else part for part in parts]  # "A and (B or C)"
             return joiner.join(dict.fromkeys(part for part in parts if part))
         name = (node.id if isinstance(node, ast.Name)
                 else getattr(node.left, "id", None) if isinstance(node, ast.Compare) else None)
         if name == "id":
             return ""  # "the record is saved": not a business condition
-        field = self.env[model]._fields.get(node.id) if isinstance(node, ast.Name) else None
+        field = self._rule_field(model, node, parent)
         if field:
+            label = self._rule_label(node, field, parent)
             if field.type == "boolean":
-                return (_("not %s", field.string) if negate else field.string)
-            return (_("%s is empty", field.string) if negate else _("%s is set", field.string))
+                return (_("not %s", label) if negate else label)
+            return (_("%s is empty", label) if negate else _("%s is set", label))
         if (isinstance(node, ast.Compare) and len(node.ops) == 1 and type(node.ops[0]) in OPPOSITE
-                and isinstance(node.left, ast.Name) and node.left.id in self.env[model]._fields
-                and literal(node.comparators[0]) is not None):
-            field = self.env[model]._fields[node.left.id]
+                and self._rule_field(model, node.left, parent) and literal(node.comparators[0]) is not None):
+            field = self._rule_field(model, node.left, parent)
             names = dict(field._description_selection(self.env)) if field.type == "selection" else {}
             values = literal(node.comparators[0])
             values = values if isinstance(values, (list, tuple)) else [values]
@@ -221,8 +222,26 @@ class AiAgentBusinessFlow(models.Model):
             operator = OPPOSITE[type(node.ops[0])] if negate else type(node.ops[0])
             if operator in (ast.In, ast.NotIn) and len(values) == 1:
                 operator = ast.Eq if operator is ast.In else ast.NotEq
-            return f"{field.string} {OPERATOR_WORDS[operator]} {text}"
+            return f"{self._rule_label(node.left, field, parent)} {OPERATOR_WORDS[operator]} {text}"
         return _("other conditions allow it")
+
+    @api.model
+    def _rule_field(self, model, node, parent=None):
+        """The field a rule names: `state` on the record itself, or `parent.state` on the parent document.
+        None for anything else."""
+        if isinstance(node, ast.Name):
+            return self.env[model]._fields.get(node.id)
+        if (parent and isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                and node.value.id == "parent" and parent in self.env):
+            return self.env[parent]._fields.get(node.attr)
+        return None
+
+    @api.model
+    def _rule_label(self, node, field, parent=None):
+        """The field's label in a sentence; a parent document's field names the document ("Purchase Order's Status")."""
+        if isinstance(node, ast.Attribute) and parent in self.env:
+            return _("%(document)s's %(field)s", document=self.env["ir.model"]._get(parent).name, field=field.string)
+        return field.string
 
     @api.model
     def _when(self, conditions, stages, by_state):

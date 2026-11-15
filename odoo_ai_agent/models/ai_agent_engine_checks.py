@@ -2,6 +2,7 @@
 Part of the ai_agent.engine model (see ai_agent_engine.py).
 """
 
+import ast
 import difflib
 import json
 import logging
@@ -13,12 +14,14 @@ from odoo.exceptions import AccessError, UserError
 from odoo.fields import Domain
 from odoo.http import request
 from odoo.tools import ormcache
+from odoo.tools.safe_eval import safe_eval
 
 from odoo.addons.mcp_server.controllers import utils as mcp_utils
+from odoo.addons.mcp_server.tools.smart_fields import is_sensitive_field_name
 
 from .ai_agent_engine_constants import (
     APP_GATE_NOT_PARENTS, COMPARE_INTENT, CONVERSATION_SCORE_TEXT, COST_FIELDS, COST_GROUPS, COST_HIDDEN,
-    FIELD_ACCESS_ERROR, HIGHLIGHT_CLAIM, LIMIT_WORDS, LOWEST,
+    FIELD_ACCESS_ERROR, FORM_TAB_VIEW_CAP, HIGHLIGHT_CLAIM, LIMIT_WORDS, LOWEST,
     OPERATION_CHECKBOXES, SCHEMA_TOOLS, SCREEN_OUTLINE_CAP, SETTING_SECRET, SETTING_STOPWORDS, SUPERLATIVE,
     TOOL_OPERATIONS, TRACE_NOTE_CAP,
 )
@@ -603,9 +606,12 @@ class AiAgentEngineChecks(models.AbstractModel):
             for setting in app.iter("setting"):
                 own = [f.get("name") for f in setting.xpath(".//field[@name]")
                        if f.xpath("ancestor::setting[1]")[0] is setting and f.get("name") in Settings._fields]
-                if not own:
-                    continue
-                main = own[0]
+                # A setting that is only a link ("Default Access Rights", "Manage API Keys"): found by its name too.
+                buttons = [" ".join(b.get("string").split()) for b in setting.xpath(".//button[@string]")
+                           if b.xpath("ancestor::setting[1]")[0] is setting]
+                if not own and not (setting.get("string") and buttons):
+                    continue  # a technical block without a name or a link
+                main = own[0] if own else None
                 blocks = setting.xpath("ancestor::block[1]")
                 parents = setting.xpath("ancestor::setting[1]")
                 parent = ""
@@ -618,11 +624,13 @@ class AiAgentEngineChecks(models.AbstractModel):
                     "general": app.get("name") == "general_settings",
                     "section": (blocks[0].get("title") or "") if blocks else "",
                     "label": setting.get("string") or Settings._fields[main].string or main,
+                    "buttons": buttons,
                     "help": " ".join((setting.get("help") or "").split()),
                     "parent": parent,
                     "company": setting.get("company_dependent") == "1",
                     "fields": own,
-                    "options": " ".join(Settings._fields[f].string or "" for f in own[1:]),
+                    "options": (" ".join(Settings._fields[f].string or "" for f in own[1:]) if own
+                                else " ".join(buttons)),
                 })
         return catalog
 
@@ -635,7 +643,10 @@ class AiAgentEngineChecks(models.AbstractModel):
         for entry in catalog_entries:
             for name in entry["fields"]:
                 field = Settings._fields.get(name)
-                if field is None or SETTING_SECRET.search(name) or name in safe:
+                # an on/off or a choice cannot hold a secret ("Enforce two-factor authentication"): only other
+                # kinds of values with a secret-like name are kept out
+                if (field is None or name in safe
+                        or (SETTING_SECRET.search(name) and field.type not in ("boolean", "selection"))):
                     continue
                 if field.type in ("boolean", "selection") or (
                         technical and field.type in ("integer", "float", "monetary", "many2one")):
@@ -697,15 +708,21 @@ class AiAgentEngineChecks(models.AbstractModel):
             raise UserError(_("Say which option to look for, e.g. 'lock confirmed orders'."))
         catalog = self._settings_catalog()
 
+        def has(text, term):
+            """The term starts a word of the text ("order" in "Orders", "invoic" in "Invoices"); a short term is a
+            whole word ("web" is not in "Website", "app" not in "Apply")."""
+            return re.search(rf"\b{re.escape(term)}" + (r"\b" if len(term) < 4 else ""), text) is not None
+
         def score(entry):
             label, help_text = entry["label"].casefold(), entry["help"].casefold()
+            # the section is a name the user sees and types ("Progressive Web App"): above the help text
             other = f"{entry['section']} {entry['parent']}".casefold()
             options = entry["options"].casefold()
-            value = sum(4 if term in label else 3 if term in options else 1 if term in help_text or term in other
-                        else 0 for term in terms)
+            value = sum(4 if has(label, term) else 3 if has(options, term) else 2 if has(other, term)
+                        else 1 if has(help_text, term) else 0 for term in terms)
             if app_filter and app_filter not in entry["app"].casefold():
                 value = 0
-            elif value and any(term in entry["app"].casefold() for term in terms):
+            elif value and any(has(entry["app"].casefold(), term) for term in terms):
                 value += 2
             return value
 
@@ -713,6 +730,27 @@ class AiAgentEngineChecks(models.AbstractModel):
         if found:
             best = score(found[0])
             found = [e for e in found if score(e) >= max(2, best / 2)][:3]
+        # A setting is the answer only when its own name has most of the user's words: one word in a detail
+        # ("link" in "Display Link QR-code" of Pay Invoices Online) is not "Link Tracker".
+        words = [w for w in dict.fromkeys(re.findall(r"[^\W\d_]{3,}", query.casefold())) if w not in SETTING_STOPWORDS]
+
+        def hits(entry):
+            links = "" if entry["fields"] else " ".join(entry["buttons"])  # a link setting is named by its link too
+            name = f"{entry['label']} {entry['parent']} {entry['section']} {links}".casefold()
+            # a word counts when it, or its stem ("orders" -> "order"), is in the setting's name or section
+            return sum(1 for w in words if any(has(name, t) for t in terms if w.startswith(t)))
+
+        def named(entry):
+            return hits(entry) * 2 >= len(words)
+
+        if not any(hits(e) == len(words) for e in found):
+            # No setting has all the words in its name: words that are an app's exact name ("Email Marketing",
+            # "Link Tracker") are about that app, not about a setting that shares one word with it.
+            app = self._module_named(query)
+            if app:
+                return app
+        weak = not any(named(e) for e in found)
+        found = [e for e in found if named(e)] or found
         if not found:
             return (f"No option matching '{query}' exists in Configuration > Settings of the installed apps. Say so "
                     "plainly; it may be done on the record itself, need an app that is not installed, or not exist.")
@@ -725,8 +763,10 @@ class AiAgentEngineChecks(models.AbstractModel):
             where = " > ".join((["Settings"] if entry["general"] else [entry["app"], "Configuration", "Settings"]) + path)
             if entry["parent"]:
                 where += f" (under {entry['parent']})"
-            main = entry["fields"][0]
-            if main.startswith("module_"):
+            main = entry["fields"][0] if entry["fields"] else ""
+            if not main:
+                status = _("a link on that Settings screen (%s), not an on/off option", ", ".join(entry["buttons"]))
+            elif main.startswith("module_"):
                 module = modules.search([("name", "=", main[7:])], limit=1)
                 if not module or module.state == "uninstallable":
                     status = _("not available in this edition (Enterprise)")
@@ -734,7 +774,7 @@ class AiAgentEngineChecks(models.AbstractModel):
                     status = _("on (its app is installed)")
                 else:
                     status = _("off (turning it on installs the %s app)", module.shortdesc or main[7:])
-            elif SETTING_SECRET.search(main):
+            elif SETTING_SECRET.search(main) and main not in values:
                 status = _("value not shown (secret)")
             else:
                 status = values.get(main, _("value not shown"))
@@ -748,15 +788,45 @@ class AiAgentEngineChecks(models.AbstractModel):
             if extra:
                 line += " Details: " + "; ".join(extra) + "."
             lines.append(line)
+        who = ("The user is an administrator and can change these settings." if technical else
+               "The user is not an administrator: tell them an administrator can change it there.")
+        if weak:
+            # No card: opening an unrelated Settings screen ("Pay Invoices Online" for "link tracker") misleads.
+            return (f"No option on the Settings screens is named like '{query}'. These options only mention some of "
+                    "those words in their details:\n" + "\n".join(lines) + "\nSay there is no setting with that name, "
+                    "unless one of these is clearly what the user meant. If it is an app or a screen, call show_app "
+                    "with its name.")
         if technical:
             target = found[0]
             app = "Settings" if target["general"] else target["app"]
             self._tool_show_app({"app": app, "menu": "Settings"}, state)
-        who = ("The user is an administrator and can change these settings." if technical else
-               "The user is not an administrator: tell them an administrator can change it there.")
         return ("Settings found on the Configuration > Settings screens (current company), best match first:\n"
                 + "\n".join(lines) + f"\n{who} Answer with the best match: say clearly whether it is on or off and "
                 "exactly where it is. Mention another match only if it may be what the user meant.")
+
+    @api.model
+    def _module_named(self, query):
+        """When the words name an app rather than a setting ("link tracker"): what Odoo knows about it, for the AI.
+        Any module (custom ones included) in any state, from Odoo's own module list; None when no app has that name."""
+        words = set(re.findall(r"[^\W\d_]+", query.casefold()))
+        best = None
+        for module in self.env["ir.module.module"].sudo().search([]):
+            name_words = re.findall(r"[^\W\d_]+", (module.shortdesc or "").casefold())
+            # every word of the app's name is in the question, and it is not a one-letter or empty name
+            if name_words and sum(len(w) for w in name_words) >= 4 and set(name_words) <= words:
+                key = (len(name_words), module.application, module.state == "installed")
+                if best is None or key > best[0]:
+                    best = (key, module)
+        if not best:
+            return None
+        module = best[1]
+        label = module.shortdesc
+        if module.state == "installed":
+            return (f"'{label}' is an app (module {module.name}), and it is installed; it is not an option on a "
+                    f"Settings screen. Call show_app with app '{label}' to open it, or to learn why the user does not "
+                    "see it (for example a menu Odoo shows only in developer mode).")
+        return (f"'{label}' is an app, not an option on a Settings screen. Tell the user: "
+                f"{self._unavailable_text(label, module.state)}")
 
     @api.model
     def _module_settings(self):
@@ -905,12 +975,147 @@ class AiAgentEngineChecks(models.AbstractModel):
             return dict(getattr(self.env["mcp.mixin"], tool["method"])(**arguments))
 
     @api.model
-    @ormcache("model", "self.env.uid", "self.env.lang")  # screens change only with modules: cached until restart
+    def _model_forms(self, model):
+        """The model's forms as this user gets them (groups and developer mode applied), the one they open first
+        first: from the menus they see (Settings > Users opens the full user form; Odoo's default user form is a short
+        one without tabs), then Odoo's default form, then the model's other main forms."""
+        from lxml import etree
+
+        view_ids = []
+        for menu in self.env["ir.ui.menu"].sudo().browse(sorted(self._visible_menus())):
+            action = menu.action
+            if action and action._name == "ir.actions.act_window" and action.res_model == model:
+                view_ids += [v.view_id.id for v in action.view_ids if v.view_mode == "form" and v.view_id]
+                if action.view_id.type == "form":
+                    view_ids.append(action.view_id.id)
+        view_ids.append(None)
+        view_ids += self.env["ir.ui.view"].sudo().search(
+            [("model", "=", model), ("type", "=", "form"), ("mode", "=", "primary")], order="priority, id").ids
+        for view_id in list(dict.fromkeys(view_ids))[:FORM_TAB_VIEW_CAP]:
+            try:
+                yield etree.fromstring(self.env[model].get_view(view_id, "form")["arch"])
+            except Exception:  # noqa: BLE001 - a form this user cannot load: try the next one
+                _logger.debug("AI Agent: skipped form view %s of %s", view_id, model, exc_info=True)
+
+    @api.model
+    def _form_tab(self, model, record_id, tab):
+        """One tab of a record's form exactly as this user sees it: {"title", "fields": [(name, label)], "buttons"}.
+
+        Odoo's own form for this user (fields of groups they lack and developer-mode-only fields are already left
+        out by get_view), then each "invisible" rule evaluated on this record, in screen order with screen labels.
+        Raises UserError naming the real tabs when none matches, so the AI can retry with one of them.
+        """
+        Model = self.env[model]
+        label = self._model_label(model)
+        try:
+            record = Model.browse(int(record_id)).exists()
+        except (TypeError, ValueError):
+            record = Model.browse()
+        if not record:
+            raise UserError(_("No %(label)s with ID %(id)s exists.", label=label, id=record_id))
+        record.check_access("read")
+        # sudo: values used only to evaluate the screen's "invisible" rules (e.g. "not has_access_livechat");
+        # they are never shown or sent. The record itself was access-checked above.
+        values = record.sudo()
+        base = {**self._domain_eval_context(), "id": record.id, "current_company_id": self.env.company.id}
+
+        def screen_value(name):
+            field = Model._fields[name]
+            value = values[name]
+            if field.type == "many2one":
+                return value.id or False
+            if field.type in ("one2many", "many2many"):
+                return value.ids
+            if field.type in ("date", "datetime"):
+                return field.to_string(value) if value else False
+            return value
+
+        def shown(node):
+            """Odoo's rule for this node on this record; an expression that cannot be evaluated here keeps the node
+            (showing a field the screen hides is a smaller mistake than hiding one it shows)."""
+            rule = str(node.get("invisible") or "").strip()
+            if rule in ("", "0", "False", "false"):
+                return True
+            if rule in ("1", "True", "true"):
+                return False
+            try:
+                names = {n.id for n in ast.walk(ast.parse(rule, mode="eval")) if isinstance(n, ast.Name)}
+                context = dict(base, **{n: screen_value(n) for n in names if n in Model._fields})
+                return not safe_eval(rule, context)
+            except Exception:  # noqa: BLE001
+                _logger.debug("AI Agent: kept a node whose rule %r could not be evaluated", rule, exc_info=True)
+                return True
+
+        def visible(node, page):
+            """The node and every group or section around it inside the tab are shown (the tab is checked apart)."""
+            for current in [node, *node.iterancestors()]:
+                if current is page:
+                    return True
+                if not shown(current):
+                    return False
+            return True
+
+        def title(page):
+            return " ".join(str(page.get("string") or page.get("name") or "").split())
+
+        wanted = " ".join(str(tab or "").casefold().split()).removesuffix(" tab")
+        form = page = None
+        all_tabs = []
+        for candidate in self._model_forms(model):
+            pages = [p for p in candidate.iter("page")
+                     if not any(a.tag == "field" for a in p.iterancestors()) and title(p)]
+            all_tabs += [title(p) for p in pages if shown(p)]
+            match = ([p for p in pages if wanted in (title(p).casefold(), str(p.get("name") or "").casefold())]
+                     or [p for p in pages if wanted and wanted in title(p).casefold()])
+            if match:
+                form, page = candidate, match[0]
+                break
+        if page is None:
+            raise UserError(_("The %(label)s form has no tab '%(tab)s'. Its tabs: %(tabs)s. Call get_record again "
+                              "with one of them as 'tab', or without 'tab'.", label=label, tab=tab,
+                              tabs=", ".join(dict.fromkeys(all_tabs)) or "none"))
+        if not shown(page):
+            raise UserError(_("The '%(tab)s' tab is not shown on this %(label)s, so there is nothing to list. Say so.",
+                              tab=title(page), label=label))
+        # The screen's own label for a field: its string, else a <label for="..."> next to it, else the field's.
+        labels = {n.get("for"): " ".join(n.get("string").split()) for n in form.iter("label")
+                  if n.get("for") and n.get("string")}
+
+        def section(node):
+            """The titled section of the tab the node is in ("Sales", "Purchase"), as on the screen."""
+            for current in node.iterancestors():
+                if current is page:
+                    return ""
+                if current.tag == "group" and current.get("string"):
+                    return " ".join(current.get("string").split())
+            return ""
+
+        found = []
+        for node in page.iter("field"):
+            name = node.get("name")
+            field = Model._fields.get(name)
+            if (field is None or any(a.tag == "field" for a in node.iterancestors()) or not visible(node, page)
+                    or field.type in ("binary", "image") or is_sensitive_field_name(name)
+                    or not Model._has_field_access(field, "read") or name in {n for n, _l, _s in found}):
+                continue
+            found.append((name, node.get("string") or labels.get(name) or field.string or name, section(node)))
+        # A label used twice on the tab ("Payment Terms" under Sales and under Purchase) gets its section, as on screen.
+        repeated = {lbl for _n, lbl, _s in found if sum(1 for _x, other, _y in found if other == lbl) > 1}
+        fields_shown = [(name, f"{sec}: {lbl}" if lbl in repeated and sec else lbl) for name, lbl, sec in found]
+        buttons = list(dict.fromkeys(
+            " ".join(n.get("string").split()) for n in page.iter("button")
+            if n.get("string") and not any(a.tag == "field" for a in n.iterancestors()) and visible(n, page)))
+        return {"title": title(page), "fields": fields_shown, "buttons": buttons}
+
+    @api.model
+    # screens change only with modules (cached until restart); developer mode shows other fields
+    @ormcache("model", "self.env.uid", "self.env.lang", "self._developer_mode()")
     def _screen_outline(self, model):
         """What the user sees for this model, read from its real screens (any model, custom ones included):
         the tabs of its form with the labels shown there, and, for line models, the columns of the list they
-        appear in on their parent's form ("Order Lines" on a sales order: ... Disc.%, Amount)."""
-        from lxml import etree
+        appear in on their parent's form ("Order Lines" on a sales order: ... Disc.%, Amount). Columns and fields
+        that are optional or shown only in some cases say so in words, from the screen's own rules."""
+        Flow = self.env["ai_agent.business.flow"]
 
         def is_hidden(node):
             return any(str(node.get(attr) or "").strip() in ("1", "True", "true")
@@ -920,19 +1125,36 @@ class AiAgentEngineChecks(models.AbstractModel):
             field = self.env[model_name]._fields.get(node.get("name"))
             return node.get("string") or (field.string if field else node.get("name"))
 
-        def columns(model_name, list_node):
+        def when(model_name, node, attr, parent=None):
+            """' (shown only when ...)' for a rule that depends on the record, in Odoo's own labels; '' otherwise."""
+            rule = str(node.get(attr) or "").strip()
+            if rule in ("", "0", "False", "false", "1", "True", "true"):
+                return ""
+            try:
+                words = Flow._words(model_name, ast.parse(rule, mode="eval").body, True, False, parent)
+            except SyntaxError:
+                words = _("other conditions allow it")
+            if not words:
+                return ""  # e.g. "once the record is saved": always true on a record the user looks at
+            if words == _("other conditions allow it"):
+                return " (shown only in some cases)"
+            return f" (shown only when {words})"
+
+        def columns(model_name, list_node, parent):
             out = []
             for node in list_node.iterchildren("field"):
-                if node.get("name") and not is_hidden(node) and str(label(model_name, node) or "").strip():
-                    out.append(f"{label(model_name, node)} [{node.get('name')}]")
+                if (not node.get("name") or is_hidden(node) or node.get("widget") == "handle"  # a drag handle
+                        or not str(label(model_name, node) or "").strip()):
+                    continue
+                text = (f"{label(model_name, node)} [{node.get('name')}]"
+                        + when(model_name, node, "column_invisible", parent))
+                if node.get("optional") == "hide":
+                    text += " (optional column, hidden by default)"
+                out.append(text)
             return list(dict.fromkeys(out))
 
         def form_arch(model_name):
-            try:
-                return etree.fromstring(self.env[model_name].get_view(view_type="form")["arch"])
-            except Exception:  # noqa: BLE001 - a model without a usable form view
-                _logger.debug("AI Agent: skipped (%s)", 'a model without a usable form view', exc_info=True)
-                return None
+            return next(self._model_forms(model_name), None)
 
         Model = self.env[model]
         lines = []
@@ -947,8 +1169,9 @@ class AiAgentEngineChecks(models.AbstractModel):
                 text = f"{label(model, node)} [{node.get('name')}]"
                 field = Model._fields.get(node.get("name"))
                 inline = node.xpath("./list | ./tree")
+                text += when(model, node, "invisible")
                 if field is not None and field.type in ("one2many", "many2many") and inline:
-                    text += f" (a list with columns: {', '.join(columns(field.comodel_name, inline[0]))})"
+                    text += f" (a list with columns: {', '.join(columns(field.comodel_name, inline[0], model))})"
                 return text
 
             tree = form.getroottree()
@@ -959,9 +1182,7 @@ class AiAgentEngineChecks(models.AbstractModel):
             if main:
                 lines.append("Main part of the form: " + ", ".join(dict.fromkeys(main)))
             for page in pages:
-                title = f"Tab '{page.get('string') or page.get('name') or ''}'"
-                if page.get("invisible"):
-                    title += " (shown only in some cases)"
+                title = f"Tab '{page.get('string') or page.get('name') or ''}'" + when(model, page, "invisible")
                 shown = [describe(n) for n in top_fields(page)]
                 panels = [w.get("name") for w in page.xpath(".//widget[@name]")]
                 # The tab's titled sections ("Sales", "Delivery", "Invoicing", "Tracking"), as on the screen.
@@ -1000,13 +1221,14 @@ class AiAgentEngineChecks(models.AbstractModel):
                     if inline:
                         lines.append(f"Shown as '{label(field.comodel_name, node)}' on the "
                                      f"{self._model_label(field.comodel_name)} form, with columns: "
-                                     + ", ".join(columns(model, inline[0])))
+                                     + ", ".join(columns(model, inline[0], field.comodel_name)))
         if not lines:
             return ""
         text = "\n".join(lines)[:SCREEN_OUTLINE_CAP]
         return ("\n\nHOW THE SCREENS SHOW THIS (labels as the user sees them; [technical name]; a column can have "
                 "another label than the field, e.g. a Subtotal field shown as 'Amount'; some columns only show with "
-                "certain settings):\n" + text)
+                "certain settings; a column or field marked 'shown only when' or 'optional' is not always on the "
+                "screen: say so when you list it):\n" + text)
 
     def _call_mcp_readable(self, tool, arguments):
         """Run a read tool; when Odoo refuses it only because some asked-for fields are private for this user

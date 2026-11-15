@@ -4,6 +4,7 @@ Every rule has sentences it must fix (taken from real answers that were wrong) a
 When a rule changes, add the new wording here: a pattern that starts removing good sentences fails these tests.
 Run: odoo-bin -c <config> -d <test database> -u odoo_ai_agent --test-tags /odoo_ai_agent --stop-after-init
 """
+from odoo.exceptions import UserError
 from odoo.tests import TransactionCase, tagged
 
 TABLE = {"type": "table", "rows": [{"values": {}}], "total": 1}
@@ -109,3 +110,43 @@ class TestAnswerCheck(TransactionCase):
         self.assertFalse(notes("Sales since April", "2026-04-01", "2026-11-15"))
         self.env.company.fiscalyear_last_month = "12"
         self.assertFalse(notes("Sales this year", "2026-01-01", "2027-01-01"))
+
+    def test_form_tab(self):
+        """A tab the user names: the fields shown there, in screen order; an unknown tab names the real ones."""
+        engine = self.env["ai_agent.engine"]
+        user = self.env.ref("base.user_admin")
+        tab = engine._form_tab("res.users", user.id, "preferences tab")
+        names = [name for name, _label in tab["fields"]]
+        self.assertEqual(tab["title"], "Preferences")
+        self.assertIn("lang", names)
+        self.assertNotIn("tz", names)  # on the Calendar tab, not Preferences
+        self.assertNotIn("odoobot_state", names)  # shown in developer mode only
+        with self.assertRaisesRegex(UserError, "Its tabs: .*Preferences"):
+            engine._form_tab("res.users", user.id, "Payroll")
+
+    def test_screen_outline(self):
+        """The form the user opens (not Odoo's short default user form), with conditional fields in words."""
+        outline = self.env["ai_agent.engine"]._screen_outline("res.users")
+        self.assertIn("Tab 'Preferences'", outline)
+        self.assertIn("(shown only when not Share User)", outline)
+
+    def test_find_setting_whole_words(self):
+        """Settings match on whole words ("web" is not "Website"); a setting that is only a link is found too."""
+        engine = self.env["ai_agent.engine"]
+        for query, expected in (("progressive web app", "Web App Name"), ("default access rights", "a link")):
+            with self.subTest(query):
+                text = engine._tool_find_setting({"query": query}, {"blocks": [], "notices": [], "question": ""})
+                first = next(line for line in text.splitlines() if line.startswith("- "))
+                self.assertIn(expected, first)
+
+    def test_find_setting_names_an_app(self):
+        """Words that are an app's name are about the app: never a setting sharing one word, never its card."""
+        engine = self.env["ai_agent.engine"]
+        module = self.env["ir.module.module"].search(
+            [("state", "=", "uninstalled"), ("shortdesc", "=ilike", "% %")], limit=1)  # e.g. "Email Marketing"
+        if not module:
+            self.skipTest("No uninstalled app with a two-word name")
+        state = {"blocks": [], "notices": [], "question": ""}
+        text = engine._tool_find_setting({"query": module.shortdesc}, state)
+        self.assertIn("is an app", text)
+        self.assertFalse([b for b in state["blocks"] if b.get("type") == "app"])

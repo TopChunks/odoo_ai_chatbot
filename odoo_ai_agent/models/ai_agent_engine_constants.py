@@ -134,6 +134,13 @@ PERIOD_ARGUMENT = {
     "required": ["name"],
     "additionalProperties": False,
 }
+FORM_TAB_VIEW_CAP = 12  # forms of one model searched for a tab the user named
+TAB_ARGUMENT = {
+    "type": "string",
+    "description": "A tab of the record's form, as the user names it (e.g. 'Preferences', 'Other Info'). When the "
+    "user asks about a tab, pass it instead of 'fields': Odoo returns exactly the fields this user sees on that tab, "
+    "in screen order.",
+}
 SCREEN_ARGUMENT = {
     "type": "string",
     "description": "A screen from get_filters (e.g. 'menu_123'). It sets the base scope exactly like opening that "
