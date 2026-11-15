@@ -101,7 +101,9 @@ export class AiAgentTable extends Component {
     }
 
     canDrill(row) {
-        return Boolean(this.props.block.grouped && row.domain && this.props.block.model);
+        // A count of 0 has no records to list: no arrow (it would only say "No records you can access").
+        const count = row.values?.__count;
+        return Boolean(this.props.block.grouped && row.domain && this.props.block.model && count !== 0);
     }
 
     /** Show the records behind a grouped row, read with the user's own rights. */

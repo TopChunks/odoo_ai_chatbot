@@ -1034,6 +1034,9 @@ STYLE
                         [block.get("model"), block.get("groupby"), block.get("measure")], default=str)) != block["id"]:
                     block["collapsed"] = True
                 seen.add(key)
+            for block in state["blocks"]:
+                if block.get("ref") and not block.get("collapsed") and self._count_in_list(block, state["blocks"]):
+                    block["collapsed"] = True  # a count of records the list above already shows in full
             # What was folded here is all noise (empty, repeated, or an earlier attempt): leave it out.
             state["blocks"] = [b for b in state["blocks"] if not b.get("collapsed")]
         # "Data used" keeps what can help the user check the answer, not empty results or name lookups.

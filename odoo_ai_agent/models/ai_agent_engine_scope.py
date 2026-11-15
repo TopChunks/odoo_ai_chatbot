@@ -141,6 +141,18 @@ class AiAgentEngineScope(models.AbstractModel):
             # Odoo can list a sub-menu as visible while its app is hidden from the user: the app must be openable.
             target = paths.filtered(lambda m: root_of(m) in roots).sorted(lambda m: len(m.complete_name or ""))[:1]
             root = root_of(target) if target else root
+        hidden_app = None
+        if not root and arguments.get("app"):
+            # The app's own menu is hidden (Link Tracker: developer mode only), but a screen of that very name is open
+            # to the user inside another app (Website > Site > This page > Link Tracker): that is where they find it.
+            # Exact names only: a "close enough" menu of another app would open the wrong screen.
+            wanted = " ".join(str(arguments["app"]).casefold().split())
+            same_name = visible.filtered(lambda m: m.action and m.parent_id and root_of(m) in roots
+                                         and " ".join((m.name or "").casefold().split()) == wanted)
+            target = same_name.sorted(lambda m: (len(m.complete_name or ""), m.id))[:1]
+            if target:
+                root = root_of(target)
+                hidden_app = self._app_unavailable(arguments["app"], None, best, root_of)
         if not root:
             known = self._app_unavailable(arguments.get("app"), arguments.get("menu"), best, root_of)
             if known:
@@ -169,6 +181,10 @@ class AiAgentEngineScope(models.AbstractModel):
             shown.add(target.id)
             state["blocks"].append({"type": "app", "id": uuid.uuid4().hex, "apps": [app]})
         found = "" if not arguments.get("menu") or target != root else f" No menu matching '{arguments['menu']}' was found, so the app itself opens."
+        if hidden_app:
+            # Both places, so the answer is complete: the screen the user can open now, and the full app.
+            found += (f" This '{path}' screen is open to the user now. There is also a full '{arguments['app']}' "
+                      f"app of its own: {hidden_app} Mention both.")
         return (f"Shown to the user: a clickable '{path}' app card with the app icon, under your answer. Nothing is "
                 "open yet: the screen opens only when the user clicks the card, so say 'click the card below to open "
                 f"it' and never that the page is open.{found}")

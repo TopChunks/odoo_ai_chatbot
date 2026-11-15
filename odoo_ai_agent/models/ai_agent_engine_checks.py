@@ -216,6 +216,31 @@ class AiAgentEngineChecks(models.AbstractModel):
         measures = [c for c in numeric if c["name"] != "__count"]
         return (measures or numeric)[0]
 
+    @api.model
+    def _count_in_list(self, block, blocks):
+        """A totals table that only counts records a complete list of the same model already shows ("link_tracker
+        installed: 1" under the list of modules with their status): the list answers it, the count adds nothing.
+        A count over records the list does not all show ("80 of 300") is kept: it says something new."""
+        spec = block.get("spec") or {}
+        model = block.get("model")
+        if (block.get("type") != "table" or not block.get("grouped") or spec.get("groupby")
+                or set(spec.get("aggregates") or []) - {"__count"} or not isinstance(model, str)
+                or model not in self.env):
+            return False
+        lists = [b for b in blocks if b is not block and not b.get("collapsed") and b.get("type") == "table"
+                 and not b.get("grouped") and b.get("model") == model and not b.get("has_more") and b.get("rows")
+                 and all(row.get("id") for row in b["rows"]) and b.get("total") == len(b["rows"])]
+        if not lists:
+            return False
+        try:
+            with self.env.cr.savepoint():  # the user's own rights; a domain the database rejects changes nothing
+                limit = max(len(b["rows"]) for b in lists) + 1  # one more than any list: a bigger count never fits
+                counted = set(self.env[model].search(spec.get("domain") or [], limit=limit).ids)
+        except Exception:  # noqa: BLE001 - keep the count when it cannot be compared
+            _logger.debug("AI Agent: count not compared with the list", exc_info=True)
+            return False
+        return any(counted <= {row["id"] for row in b["rows"]} for b in lists)
+
     @staticmethod
     def _trivial_result(block):
         """A helper result with nothing to check: empty, all zero, or the lookup of one record by its name."""

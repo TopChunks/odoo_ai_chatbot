@@ -139,6 +139,42 @@ class TestAnswerCheck(TransactionCase):
                 first = next(line for line in text.splitlines() if line.startswith("- "))
                 self.assertIn(expected, first)
 
+    def test_count_in_list(self):
+        """A count of records a complete list above already shows is redundant; any other count is kept."""
+        engine = self.env["ai_agent.engine"]
+        first, second = self.env["res.partner"].create([{"name": "AI count test A"}, {"name": "AI count test B"}])
+        listed = {"type": "table", "model": "res.partner", "rows": [{"id": first.id, "values": {}}], "total": 1}
+
+        def count(domain, aggregates=("__count",)):
+            return {"type": "table", "grouped": True, "model": "res.partner",
+                    "spec": {"groupby": [], "aggregates": list(aggregates), "domain": domain}}
+
+        same = count([["id", "=", first.id]])
+        self.assertTrue(engine._count_in_list(same, [listed, same]))
+        nothing = count([["id", "=", 0]])
+        self.assertTrue(engine._count_in_list(nothing, [listed, nothing]))
+        both = count([["id", "in", [first.id, second.id]]])  # B is not in the list: the count says more
+        self.assertFalse(engine._count_in_list(both, [listed, both]))
+        cut = dict(listed, has_more=True)
+        self.assertFalse(engine._count_in_list(same, [cut, same]))
+        total = count([["id", "=", first.id]], ("id:sum",))
+        self.assertFalse(engine._count_in_list(total, [listed, total]))
+
+    def test_show_app_same_name_elsewhere(self):
+        """An app shown only in developer mode, with a screen of the same name in an app the user opens: that screen,
+        and the full app's developer mode note."""
+        Menu = self.env["ir.ui.menu"]
+        action = self.env["ir.actions.act_window"].create({"name": "AI test", "res_model": "res.partner"})
+        app = Menu.create({"name": "AI Test Tool", "group_ids": [(4, self.env.ref("base.group_no_one").id)]})
+        Menu.create({"name": "List", "parent_id": app.id, "action": f"ir.actions.act_window,{action.id}"})
+        Menu.create({"name": "AI Test Tool", "parent_id": self.env.ref("base.menu_administration").id,
+                     "action": f"ir.actions.act_window,{action.id}"})
+        state = {"blocks": [], "notices": [], "question": ""}
+        text = self.env["ai_agent.engine"]._tool_show_app({"app": "AI Test Tool"}, state)
+        cards = [a["path"] for b in state["blocks"] if b.get("type") == "app" for a in b["apps"]]
+        self.assertEqual(cards, ["Settings › AI Test Tool"])
+        self.assertIn("developer mode", text)
+
     def test_find_setting_names_an_app(self):
         """Words that are an app's name are about the app: never a setting sharing one word, never its card."""
         engine = self.env["ai_agent.engine"]
