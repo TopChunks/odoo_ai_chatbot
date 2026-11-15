@@ -115,6 +115,17 @@ FILTERS_ARGUMENT = {
     "description": "Names of the model's own Odoo filters (from get_filters), e.g. [\"filter_won_status_lost\"]. "
     "They are combined with the domain (AND).",
 }
+# Revenue as Odoo's reports and dashboards count it: without tax. The amount with tax and its untaxed twin,
+# per model (sales and purchase orders, invoices, order lines, reports), where both exist.
+UNTAXED_PAIRS = (("amount_total", "amount_untaxed"), ("amount_total_signed", "amount_untaxed_signed"),
+                 ("amount_total_in_currency_signed", "amount_untaxed_in_currency_signed"),
+                 ("price_total", "price_subtotal"))
+REVENUE_WORDS = re.compile(r"\b(revenues?|turnover|income|earn(ed|ings|s)?|net sales)\b", re.IGNORECASE)
+# The user wants the amount with tax: the total to pay, gross, or "total" said of invoices, bills or orders.
+TAX_INCLUDED = re.compile(r"\b(with|incl(uding|\.)?|plus) (the )?tax(es)?\b|\btax(es)? incl|\bgross\b|"
+                          r"\bgrand total\b|\btotal amounts?\b|\bamounts? (total|due|to pay)\b|\binvoiced (total|amount)\b",
+                          re.IGNORECASE)
+PLAIN_TOTAL = re.compile(r"\btotal\b", re.IGNORECASE)
 # The user already said which year they mean: no fiscal-year note under the answer.
 FISCAL_WORDS = re.compile(r"\b(fiscal|financial|calendar|fy)\b", re.IGNORECASE)
 PERIOD_NAMES = [
@@ -498,7 +509,7 @@ CHART_SCHEMA = {
         },
         "measure": {
             "type": "string",
-            "description": "Numeric field to add up (e.g. 'amount_total', 'expected_revenue'), or '__count' to "
+            "description": "Numeric field to add up (e.g. 'amount_untaxed' for revenue, 'expected_revenue'), or '__count' to "
             "count records.",
         },
         "domain": DOMAIN_SCHEMA,

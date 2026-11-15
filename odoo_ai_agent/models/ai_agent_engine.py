@@ -858,6 +858,21 @@ STYLE
             "business_flow": lambda: self._tool_search_business_flow(arguments),
             "write": lambda: self._tool_propose(tool, arguments, state),
         }
+        # Revenue as Odoo's reports count it (without tax), unless the user asks for the amount with tax.
+        untaxed = (self._untaxed_revenue(name, arguments, state)
+                   if name in ("search_records", "aggregate_records", "get_record", "show_chart") else "")
+        if name in ("present", "calculate") and state.get("untaxed_swaps"):
+            # A label, column or formula naming the amount with tax that Odoo replaced in this answer (r1.amount_total)
+            # means the untaxed one now in the results: same column, not a missing one. Whole names only.
+            # Only where no result of this answer still has the amount with tax (a list keeps its Total column).
+            kept = {column["name"].split(":")[0] for result in (state.get("results") or {}).values()
+                    for column in result.get("columns") or []}
+            text = json.dumps(arguments)
+            for taxed, untaxed_name in state["untaxed_swaps"].items():
+                if taxed not in kept:
+                    text = re.sub(rf"\b{re.escape(taxed)}\b", untaxed_name, text)
+            arguments.clear()
+            arguments.update(json.loads(text))
         try:
             # One savepoint per tool: a query the database rejects (text on a number field...) is rolled back on its
             # own, so the AI gets the error to correct and the answer can still be posted.
@@ -890,6 +905,8 @@ STYLE
             result += (" Note: filtered on " + ", ".join(f"{new} instead of {old}" for old, new in effective)
                        + " (effective membership, including groups implied by other groups, as the user form and "
                        "Settings show it).")
+        if untaxed and isinstance(result, str):
+            result += untaxed
         self._note(state, call, result)
         return result
 

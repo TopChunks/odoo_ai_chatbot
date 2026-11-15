@@ -22,7 +22,8 @@ from odoo.addons.mcp_server.tools.smart_fields import is_sensitive_field_name
 from .ai_agent_engine_constants import (
     APP_GATE_NOT_PARENTS, COMPARE_INTENT, CONVERSATION_SCORE_TEXT, COST_FIELDS, COST_GROUPS, COST_HIDDEN,
     FIELD_ACCESS_ERROR, FORM_TAB_VIEW_CAP, HIGHLIGHT_CLAIM, LIMIT_WORDS, LOWEST,
-    OPERATION_CHECKBOXES, SCHEMA_TOOLS, SCREEN_OUTLINE_CAP, SETTING_SECRET, SETTING_STOPWORDS, SUPERLATIVE,
+    OPERATION_CHECKBOXES, PLAIN_TOTAL, REVENUE_WORDS, SCHEMA_TOOLS, SCREEN_OUTLINE_CAP, SETTING_SECRET,
+    SETTING_STOPWORDS, SUPERLATIVE, TAX_INCLUDED, UNTAXED_PAIRS,
     TOOL_OPERATIONS, TRACE_NOTE_CAP,
 )
 
@@ -215,6 +216,54 @@ class AiAgentEngineChecks(models.AbstractModel):
             return numeric[-1]  # the computed column
         measures = [c for c in numeric if c["name"] != "__count"]
         return (measures or numeric)[0]
+
+    @api.model
+    def _untaxed_revenue(self, tool_name, arguments, state):
+        """Revenue as Odoo's own reports and dashboards count it: without tax. Sums and rankings of an amount with
+        tax ("top sales teams", "sales by customer") and amounts the user calls revenue use its untaxed twin
+        (amount_total -> amount_untaxed, price_total -> price_subtotal). Unchanged when the user asks for the amount
+        with tax ("total amount", "with tax", "gross", "amount due") or for the "total" of invoices or orders, and for
+        plain lists of records (they show the Total column of Odoo's own lists). Returns a note for the AI."""
+        model = arguments.get("model")
+        if not isinstance(model, str) or model not in self.env:
+            return ""
+        question = state.get("question") or ""
+        revenue = bool(REVENUE_WORDS.search(question))
+        if TAX_INCLUDED.search(question) or (PLAIN_TOTAL.search(question) and not revenue):
+            return ""
+        if not revenue and tool_name not in ("aggregate_records", "show_chart"):
+            return ""  # a list or a card: the same amounts as Odoo's own list and form
+        if not revenue and tool_name == "aggregate_records" and not arguments.get("groupby"):
+            return ""  # one overall total goes with a list, which Odoo sums with tax; breakdowns are analysis
+        fields = self.env[model]._fields
+        if not revenue and "amount_residual" in fields:
+            return ""  # invoices and bills: their amounts are what is owed, tax included (as their lists sum them)
+        pairs = {taxed: untaxed for taxed, untaxed in UNTAXED_PAIRS if taxed in fields and untaxed in fields}
+        swapped = []
+
+        def swap(spec):
+            """'amount_total', 'amount_total:sum' or 'amount_total desc' with the untaxed field instead."""
+            match = re.match(r"(\s*)([\w.]+)(.*)", spec, re.DOTALL)
+            if match and match.group(2) in pairs:
+                swapped.append((match.group(2), pairs[match.group(2)]))
+                return match.group(1) + pairs[match.group(2)] + match.group(3)
+            return spec
+
+        for key in ("aggregates", "fields"):
+            if isinstance(arguments.get(key), list):
+                arguments[key] = [swap(spec) if isinstance(spec, str) else spec for spec in arguments[key]]
+        if isinstance(arguments.get("measure"), str):
+            arguments["measure"] = swap(arguments["measure"])
+        if isinstance(arguments.get("order"), str) and tool_name != "show_chart":
+            arguments["order"] = ", ".join(swap(part) for part in arguments["order"].split(","))
+        if not swapped:
+            return ""
+        # Remembered for this answer: later references to the amount with tax (present, calculate) use the same field.
+        state.setdefault("untaxed_swaps", {}).update(dict(swapped))
+        labels = ", ".join(dict.fromkeys(f"{fields[untaxed]._description_string(self.env)} ({untaxed}) instead of "
+                                         f"{taxed}" for taxed, untaxed in swapped))
+        return (f" REVENUE WITHOUT TAX: Odoo used {labels}, as its own reports and dashboards count revenue. Say the "
+                "amounts are untaxed (without tax); the user can ask for the amounts with tax.")
 
     @api.model
     def _count_in_list(self, block, blocks):

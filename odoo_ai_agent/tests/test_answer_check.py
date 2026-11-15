@@ -175,6 +175,29 @@ class TestAnswerCheck(TransactionCase):
         self.assertEqual(cards, ["Settings › AI Test Tool"])
         self.assertIn("developer mode", text)
 
+    def test_untaxed_revenue(self):
+        """Revenue without tax, as Odoo's reports count it; the amount with tax when asked, and for what is owed."""
+        if "account.move" not in self.env:
+            self.skipTest("Accounting is not installed")
+        engine = self.env["ai_agent.engine"]
+
+        def run(tool, question, **arguments):
+            arguments = dict(arguments, model="account.move")
+            note = engine._untaxed_revenue(tool, arguments, {"question": question})
+            return arguments, note
+
+        args, note = run("aggregate_records", "Revenue by customer this year", aggregates=["amount_total:sum"])
+        self.assertEqual(args["aggregates"], ["amount_untaxed:sum"])
+        self.assertIn("without tax", note)
+        args, _note = run("search_records", "Top invoice by revenue", fields=["name", "amount_total"],
+                          order="amount_total desc")
+        self.assertEqual((args["fields"], args["order"]), (["name", "amount_untaxed"], "amount_untaxed desc"))
+        for question in ("Revenue by customer including tax", "Total amount of invoices by customer",
+                         "Unpaid invoices by customer"):  # asked with tax; or what is owed (tax included)
+            with self.subTest(question):
+                args, note = run("aggregate_records", question, aggregates=["amount_total:sum"])
+                self.assertEqual((args["aggregates"], note), (["amount_total:sum"], ""))
+
     def test_find_setting_names_an_app(self):
         """Words that are an app's name are about the app: never a setting sharing one word, never its card."""
         engine = self.env["ai_agent.engine"]
