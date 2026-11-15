@@ -633,7 +633,11 @@ class AiAgentEngineScope(models.AbstractModel):
             raise UserError(_("Odoo does not keep a history of %(field)s on %(model)s, so the date of these changes "
                               "is unknown.", field=field.string, model=self._model_label(model)))
         ir_field = self.env["ir.model.fields"]._get(model, field_name)
-        domain = [("field_id", "=", ir_field.id), ("mail_message_id.model", "=", model)]
+        # Only changes on records this user can see, filtered in the database before the newest CHANGES_CAP are
+        # taken: filtering afterwards lets other teams' changes fill the cap and hide this user's own.
+        visible = Model.with_context(active_test=False)._search([])
+        domain = [("field_id", "=", ir_field.id), ("mail_message_id.model", "=", model),
+                  ("mail_message_id.res_id", "in", visible)]
         period = arguments.get("period")
         if period:
             start, end = self._period_bounds(period.get("name"), period.get("count"))
@@ -648,7 +652,7 @@ class AiAgentEngineScope(models.AbstractModel):
             candidates = {str(char_value or "").lower(), str(int_value or "")}
             return wanted in candidates or str(selection.get(wanted, "")).lower() in candidates - {""}
 
-        # sudo: tracking values are read only to find record ids; the records themselves are filtered by access.
+        # sudo: tracking values are read only to find record ids (of records the user can see, as above).
         tracks = self.env["mail.tracking.value"].sudo().search(domain, order="id desc", limit=CHANGES_CAP)
         latest = {}
         for track in tracks:
