@@ -1054,6 +1054,7 @@ STYLE
         if drop:
             state["blocks"] = [b for b in state["blocks"] if not any(b is x for x in drop)]
         self._add_top_note(state, text or "")
+        self._fiscal_year_note(state)
         # Info notes (best salesperson, archived record) go under the tables they are about.
         notes = [b for b in state["blocks"] if b.get("type") == "notice" and b.get("level") == "info"]
         state["blocks"] = [b for b in state["blocks"] if b not in notes] + notes

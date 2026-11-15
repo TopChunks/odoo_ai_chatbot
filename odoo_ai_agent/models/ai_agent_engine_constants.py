@@ -115,6 +115,8 @@ FILTERS_ARGUMENT = {
     "description": "Names of the model's own Odoo filters (from get_filters), e.g. [\"filter_won_status_lost\"]. "
     "They are combined with the domain (AND).",
 }
+# The user already said which year they mean: no fiscal-year note under the answer.
+FISCAL_WORDS = re.compile(r"\b(fiscal|financial|calendar|fy)\b", re.IGNORECASE)
 PERIOD_NAMES = [
     "today", "yesterday", "this_week", "last_week", "this_month", "last_month", "this_quarter", "last_quarter",
     "this_year", "last_year", "year_to_date", "last_n_days", "last_n_weeks", "last_n_months", "next_n_days",

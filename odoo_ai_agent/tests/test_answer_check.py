@@ -87,3 +87,25 @@ class TestAnswerCheck(TransactionCase):
             with self.subTest(name):
                 state = {"question": question, "blocks": [dict(b) for b in blocks]}
                 self.assertEqual(engine._clean_answer(text, state, {"share_data": shared}), expected)
+
+    def test_fiscal_year_note(self):
+        """A whole April-March year shown: Odoo says it is the fiscal year, unless the user named the year type."""
+        if "fiscalyear_last_month" not in self.env.company._fields:
+            self.skipTest("Accounting is not installed")
+        self.env.company.fiscalyear_last_month = "3"
+        engine = self.env["ai_agent.engine"]
+
+        def notes(question, start, end):
+            chart = {"type": "chart", "model": "res.partner",
+                     "domain": [["date", ">=", start], ["date", "<", end]]}
+            state = {"question": question, "blocks": [chart]}
+            engine._fiscal_year_note(state)
+            return [b["text"] for b in state["blocks"] if b.get("type") == "notice"]
+
+        self.assertIn("is your company's fiscal year (April to March)",
+                      notes("Sales by customer this year", "2026-04-01", "2027-04-01")[0])
+        self.assertFalse(notes("Sales this fiscal year", "2026-04-01", "2027-04-01"))
+        self.assertFalse(notes("Sales in calendar year 2026", "2026-01-01", "2027-01-01"))
+        self.assertFalse(notes("Sales since April", "2026-04-01", "2026-11-15"))
+        self.env.company.fiscalyear_last_month = "12"
+        self.assertFalse(notes("Sales this year", "2026-01-01", "2027-01-01"))

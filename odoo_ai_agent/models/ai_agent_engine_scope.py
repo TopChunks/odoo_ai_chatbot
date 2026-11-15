@@ -21,7 +21,7 @@ from odoo.tools.safe_eval import safe_eval
 from odoo.tools.safe_eval import time as safe_time
 
 from .ai_agent_engine_constants import (
-    CHANGES_CAP, PAID_QUESTION, PAID_UNSURE, PERIOD_NAMES, TABLE_ROW_CAP, YES_NO,
+    CHANGES_CAP, FISCAL_WORDS, PAID_QUESTION, PAID_UNSURE, PERIOD_NAMES, TABLE_ROW_CAP, YES_NO,
 )
 
 _logger = logging.getLogger(__name__)
@@ -502,7 +502,40 @@ class AiAgentEngineScope(models.AbstractModel):
             span = start.strftime("%a %d %b %Y") if start == last else \
                 f"{start.strftime('%a %d %b %Y')} to {last.strftime('%a %d %b %Y')}"
             parts.append(f"{label} = {span}")
+        if self._fiscal_start_month() != 1:
+            # "this year" is the company's fiscal year; the calendar year only when the user asks for it.
+            today = fields.Date.context_today(self.with_context(tz=self.env.user.tz or "UTC"))
+            parts = [p.replace("this year =", "this year (the company's fiscal year) =", 1)
+                     .replace("last year =", "last year (fiscal) =", 1) for p in parts]
+            parts.append(f"calendar year (only when the user says calendar year or January to December) = "
+                         f"Jan to Dec, e.g. this calendar year = 01 Jan {today.year} to 31 Dec {today.year}")
         return "; ".join(parts)
+
+    @api.model
+    def _fiscal_start_month(self):
+        """First month of the company's fiscal year (1 = January)."""
+        return int(getattr(self.env.company, "fiscalyear_last_month", None) or 12) % 12 + 1
+
+    @api.model
+    def _fiscal_year_note(self, state):
+        """A note under an answer that covers a whole fiscal year other than January-December: Odoo says which
+        year it is (the AI may not), so a user expecting January-December is not surprised."""
+        start_month = self._fiscal_start_month()
+        if start_month == 1 or FISCAL_WORDS.search(state.get("question") or ""):
+            return
+        for block in state["blocks"]:
+            if block.get("type") not in ("table", "chart") or block.get("collapsed") or block.get("model") not in self.env:
+                continue
+            domain = block.get("domain") or (block.get("spec") or {}).get("domain")  # totals tables: in their spec
+            for low, high in self._date_ranges(block["model"], domain).values():
+                if (low and high and low.day == 1 and low.month == start_month
+                        and high == low + relativedelta(years=1) - datetime.timedelta(days=1)):
+                    self._add_notice(state, _(
+                        "%(start)s – %(end)s is your company's fiscal year (%(first)s to %(last)s). For January to "
+                        "December, ask for the calendar year, e.g. \"calendar year %(year)s\".",
+                        start=low.strftime("%d %b %Y"), end=high.strftime("%d %b %Y"), first=low.strftime("%B"),
+                        last=high.strftime("%B"), year=low.year), level="info")
+                    return
 
     @api.model
     def _period_bounds(self, name, count=None):
@@ -512,8 +545,7 @@ class AiAgentEngineScope(models.AbstractModel):
         week_start = int(getattr(lang, "week_start", None) or 1)
         week = today - datetime.timedelta(days=(today.isoweekday() - week_start) % 7)
         month = today.replace(day=1)
-        fiscal_start_month = int(getattr(self.env.company, "fiscalyear_last_month", None) or 12) % 12 + 1
-        year = datetime.date(today.year, fiscal_start_month, 1)
+        year = datetime.date(today.year, self._fiscal_start_month(), 1)
         if year > today:
             year -= relativedelta(years=1)
         quarter = year + relativedelta(months=((today.year - year.year) * 12 + today.month - year.month) // 3 * 3)
@@ -701,6 +733,21 @@ class AiAgentEngineScope(models.AbstractModel):
         parts = []
         if filter_labels:
             parts.extend(filter_labels)
+        for label, (low, high) in self._date_ranges(model, domain).items():
+            show = lambda d: d.strftime("%d %b %Y")  # noqa: E731
+            if low and high:
+                parts.append(f"{label}: {show(low)} – {show(high)}")
+            elif low:
+                parts.append(_("%(label)s: from %(day)s", label=label, day=show(low)))
+            else:
+                parts.append(_("%(label)s: until %(day)s", label=label, day=show(high)))
+        if top:
+            parts.append(_("Top %s only", top))
+        return " · ".join(parts)
+
+    @api.model
+    def _date_ranges(self, model, domain):
+        """{date field label: [first day, last day]} of the date conditions in a domain (both ends included)."""
         Model = self.env[model] if model in self.env else None
         ranges = {}
         for term in domain or []:
@@ -726,14 +773,4 @@ class AiAgentEngineScope(models.AbstractModel):
                 bounds[0] = day + datetime.timedelta(days=1) if operator == ">" else day
             else:
                 bounds[1] = day - datetime.timedelta(days=1) if operator == "<" else day
-        for label, (low, high) in ranges.items():
-            show = lambda d: d.strftime("%d %b %Y")  # noqa: E731
-            if low and high:
-                parts.append(f"{label}: {show(low)} – {show(high)}")
-            elif low:
-                parts.append(_("%(label)s: from %(day)s", label=label, day=show(low)))
-            else:
-                parts.append(_("%(label)s: until %(day)s", label=label, day=show(high)))
-        if top:
-            parts.append(_("Top %s only", top))
-        return " · ".join(parts)
+        return ranges
