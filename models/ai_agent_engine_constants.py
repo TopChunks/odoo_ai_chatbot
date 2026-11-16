@@ -184,17 +184,6 @@ SHOW_APP_SCHEMA = {
     },
     "additionalProperties": False,
 }
-BUSINESS_FLOW_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "query": {"type": "string", "description": "A short description of the process, action or behavior to find, "
-                  "with the business words and, if known, field or button names (e.g. 'cancel posted invoice', "
-                  "'purchase order confirm budget code approval')."},
-        "model": {"type": "string", "description": "Optional technical model the flow is about, e.g. purchase.order."},
-    },
-    "required": ["query"],
-    "additionalProperties": False,
-}
 
 CALCULATE_SCHEMA = {
     "type": "object",
@@ -355,11 +344,6 @@ PAID_UNSURE = re.compile(r"\b(?:can't|cannot|can not|unable to|couldn't|could no
                          r"\bcheck (?:those|these|the) (?:figures|values|columns)\b|\bre-?run the check\b|"
                          r"\bdefinite answer\b", re.IGNORECASE)
 # How answers name the custom code they are based on: technical details for administrators, plain words otherwise.
-FLOW_SOURCE_TECHNICAL = ("End with one short line 'Technical details:' citing the module and file with line number "
-                         "in backticks, e.g. `my_module/models/sale_order.py:42`.")
-FLOW_SOURCE_PLAIN = ("Say in one plain sentence that this is a rule your company added to Odoo, naming the module by "
-                     "its title (e.g. 'Sales Approval Rules'); do not mention file names, methods, line numbers or "
-                     "technical module names.")
 ERROR_SOURCE_TECHNICAL = ("End this part with one short line 'Technical details:' citing the code as module/file:line "
                           "in backticks.")
 ERROR_SOURCE_PLAIN = ("If the check comes from the custom code, say it is a rule your company added to Odoo, naming "
@@ -560,7 +544,6 @@ PROGRESS_LABELS = {
     "user_access_rights": _lt("Reading access rights…"),
     "find_setting": _lt("Checking the settings…"),
     "find_changes": _lt("Checking the change history of %s…"),
-    "search_business_flow": _lt("Checking the custom business flow…"),
 }
 
 

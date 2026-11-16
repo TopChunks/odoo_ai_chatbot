@@ -13,9 +13,6 @@
                     <code class="ms-1" t-esc="source.module + '/' + source.path + ':' + source.line"/>
                 </t>
             </div>
-            <div t-elif="!aiResolution.codeChecked" class="small text-muted mt-2">
-                The custom code was not checked: an administrator can turn on the business-flow index in AI Agent settings.
-            </div>
         </div>
         <div t-if="aiResolution.error" class="alert alert-warning mt-3 mb-0" role="alert" t-esc="aiResolution.error"/>
         <div t-if="aiResolution.enabled" class="d-flex flex-wrap align-items-center gap-2 mt-3">

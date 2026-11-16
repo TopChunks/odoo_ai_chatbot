@@ -3,8 +3,6 @@ from odoo.exceptions import UserError
 
 from odoo.addons.mcp_server.controllers import utils as mcp_utils
 
-from .ai_agent_flow import MAX_EXCERPTS, REFRESH_DAYS_PARAM, refresh_days
-
 
 class ResConfigSettings(models.TransientModel):
     _inherit = "res.config.settings"
@@ -32,14 +30,7 @@ class ResConfigSettings(models.TransientModel):
         string="Resolve errors with AI",
         config_parameter="odoo_ai_agent.error_resolution_enabled",
         help="Users must click the button. The error message, the model, action and record it happened on, and the "
-        "related custom code are sent to the configured AI provider; record values only if data sharing is on.",
-    )
-    ai_agent_business_flow_enabled = fields.Boolean(
-        string="Business flow context",
-        config_parameter="odoo_ai_agent.business_flow_enabled",
-        help="Builds the Business Flow menu and lets the AI explain this database's processes from its custom modules, "
-        "Studio views and automation rules. Relevant excerpts are sent to the AI provider only when a user asks about "
-        "a process or resolves an error.",
+        "record facts it checks are sent to the configured AI provider; record values only if data sharing is on.",
     )
     ai_agent_max_steps = fields.Integer(
         string="Maximum tool steps per answer", config_parameter="odoo_ai_agent.max_steps", default=8
@@ -52,15 +43,6 @@ class ResConfigSettings(models.TransientModel):
     )
     ai_agent_mcp_enabled = fields.Boolean(compute="_compute_ai_agent_mcp_status")
     ai_agent_mcp_model_count = fields.Integer(compute="_compute_ai_agent_mcp_status")
-    ai_agent_flow_index_count = fields.Integer(compute="_compute_ai_agent_flow_status")
-    ai_agent_flow_indexed_at = fields.Datetime(compute="_compute_ai_agent_flow_status")  # shown in the user's time zone
-    ai_agent_flow_count = fields.Integer(compute="_compute_ai_agent_flow_status")
-    ai_agent_flow_question_tokens = fields.Integer(compute="_compute_ai_agent_flow_status")
-    # Saved in get_values/set_values, not with config_parameter: Odoo deletes an integer parameter saved as 0.
-    ai_agent_flow_refresh_days = fields.Integer(
-        string="Update the context every (days)",
-        help="The context is updated automatically after this many days (0 = only with the button).",
-    )
 
     @api.depends("company_id")
     def _compute_ai_agent_mcp_status(self):
@@ -69,34 +51,6 @@ class ResConfigSettings(models.TransientModel):
         for settings in self:
             settings.ai_agent_mcp_enabled = enabled
             settings.ai_agent_mcp_model_count = count
-
-    @api.depends("ai_agent_business_flow_enabled")
-    def _compute_ai_agent_flow_status(self):
-        params = self.env["ir.config_parameter"].sudo()
-        Index = self.env["ai_agent.flow.index"].sudo()
-        count = Index.search_count([])
-        indexed_at = fields.Datetime.to_datetime(params.get_param("odoo_ai_agent.business_flow_indexed_at") or False)
-        # A flow question sends at most MAX_EXCERPTS excerpts; about 4 characters make one token.
-        lengths = [len(content or "") for content in Index.search([], limit=500).mapped("content")]
-        tokens = round(sum(lengths) / len(lengths) * MAX_EXCERPTS / 4, -2) if lengths else 0
-        flows = self.env["ai_agent.business.flow"].sudo().search_count([])
-        for settings in self:
-            settings.ai_agent_flow_index_count = count
-            settings.ai_agent_flow_indexed_at = indexed_at
-            settings.ai_agent_flow_count = flows
-            settings.ai_agent_flow_question_tokens = int(tokens)
-
-    def action_ai_agent_rebuild_flow_index(self):
-        self.ensure_one()
-        self.execute()
-        self.env["ai_agent.flow.index"].action_rebuild()
-        return {"type": "ir.actions.client", "tag": "reload"}
-
-    @api.model
-    def get_values(self):
-        values = super().get_values()
-        values["ai_agent_flow_refresh_days"] = refresh_days(self.env)
-        return values
 
     @api.onchange("ai_agent_provider_id")
     def _onchange_ai_agent_provider_id(self):
@@ -111,16 +65,7 @@ class ResConfigSettings(models.TransientModel):
                 raise UserError(_("The maximum answer length must be between 256 and 65,536 tokens."))
             if settings.ai_agent_timeout and not 10 <= settings.ai_agent_timeout <= 600:
                 raise UserError(_("The provider timeout must be between 10 and 600 seconds."))
-            if not 0 <= settings.ai_agent_flow_refresh_days <= 365:
-                raise UserError(_("The context update interval must be between 0 and 365 days."))
-        result = super().set_values()
-        for settings in self:
-            self.env["ir.config_parameter"].sudo().set_param(REFRESH_DAYS_PARAM, str(settings.ai_agent_flow_refresh_days))
-            if not settings.ai_agent_business_flow_enabled:
-                self.env["ai_agent.flow.index"].sudo().search([]).unlink()
-                self.env["ai_agent.business.flow"].sudo().search([]).unlink()
-                self.env["ir.config_parameter"].sudo().set_param("odoo_ai_agent.business_flow_indexed_at", False)
-        return result
+        return super().set_values()
 
     def action_ai_agent_sync_models(self):
         self.ensure_one()

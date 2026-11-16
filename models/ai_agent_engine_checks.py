@@ -29,6 +29,21 @@ from .ai_agent_engine_constants import (
 
 _logger = logging.getLogger(__name__)
 
+# A screen's rule ("invisible") in plain words, from Odoo's own field and value labels.
+OPPOSITE = {ast.Eq: ast.NotEq, ast.NotEq: ast.Eq, ast.In: ast.NotIn, ast.NotIn: ast.In,
+            ast.Gt: ast.LtE, ast.LtE: ast.Gt, ast.GtE: ast.Lt, ast.Lt: ast.GtE}
+OPERATOR_WORDS = {ast.Eq: "is", ast.NotEq: "is not", ast.In: "is one of", ast.NotIn: "is not one of",
+                  ast.Gt: "is more than", ast.GtE: "is at least", ast.Lt: "is less than", ast.LtE: "is at most"}
+
+
+def literal(node):
+    """The constant, or list of constants, a rule compares with; None if it is anything else."""
+    try:
+        value = ast.literal_eval(node)
+    except (ValueError, SyntaxError, TypeError):
+        return None
+    return value if isinstance(value, (str, int, float, bool, list, tuple)) else None
+
 
 class AiAgentEngineChecks(models.AbstractModel):
     _inherit = "ai_agent.engine"
@@ -1094,6 +1109,65 @@ class AiAgentEngineChecks(models.AbstractModel):
             return dict(getattr(self.env["mcp.mixin"], tool["method"])(**arguments))
 
     @api.model
+    def _rule_words(self, model, node, negate, by_state, parent=None):
+        """`node` (or its opposite when negate) in plain words, leaving out what the stage list already says.
+        `parent`: the model `parent.` refers to in a list column's rule (the order of an order line)."""
+        if by_state and "state" in {n.id for n in ast.walk(node) if isinstance(n, ast.Name)} and not any(
+                isinstance(n, ast.Name) and n.id != "state" for n in ast.walk(node)):
+            return ""
+        if isinstance(node, ast.Constant):
+            return ""
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            return self._rule_words(model, node.operand, not negate, by_state, parent)
+        if isinstance(node, ast.BoolOp):
+            joiner = _(" and ") if isinstance(node.op, ast.Or) == negate else _(" or ")
+            other = _(" or ") if joiner == _(" and ") else _(" and ")
+            parts = [self._rule_words(model, value, negate, by_state, parent) for value in node.values]
+            parts = [f"({part})" if other in part else part for part in parts]  # "A and (B or C)"
+            return joiner.join(dict.fromkeys(part for part in parts if part))
+        name = (node.id if isinstance(node, ast.Name)
+                else getattr(node.left, "id", None) if isinstance(node, ast.Compare) else None)
+        if name == "id":
+            return ""  # "the record is saved": not a business condition
+        field = self._rule_field(model, node, parent)
+        if field:
+            label = self._rule_label(node, field, parent)
+            if field.type == "boolean":
+                return (_("not %s", label) if negate else label)
+            return (_("%s is empty", label) if negate else _("%s is set", label))
+        if (isinstance(node, ast.Compare) and len(node.ops) == 1 and type(node.ops[0]) in OPPOSITE
+                and self._rule_field(model, node.left, parent) and literal(node.comparators[0]) is not None):
+            field = self._rule_field(model, node.left, parent)
+            names = dict(field._description_selection(self.env)) if field.type == "selection" else {}
+            values = literal(node.comparators[0])
+            values = values if isinstance(values, (list, tuple)) else [values]
+            text = ", ".join(f'"{names.get(value, value)}"' if isinstance(value, str) else str(value)
+                             for value in values)
+            operator = OPPOSITE[type(node.ops[0])] if negate else type(node.ops[0])
+            if operator in (ast.In, ast.NotIn) and len(values) == 1:
+                operator = ast.Eq if operator is ast.In else ast.NotEq
+            return f"{self._rule_label(node.left, field, parent)} {OPERATOR_WORDS[operator]} {text}"
+        return _("other conditions allow it")
+
+    @api.model
+    def _rule_field(self, model, node, parent=None):
+        """The field a rule names: `state` on the record itself, or `parent.state` on the parent document.
+        None for anything else."""
+        if isinstance(node, ast.Name):
+            return self.env[model]._fields.get(node.id)
+        if (parent and isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                and node.value.id == "parent" and parent in self.env):
+            return self.env[parent]._fields.get(node.attr)
+        return None
+
+    @api.model
+    def _rule_label(self, node, field, parent=None):
+        """The field's label in a sentence; a parent document's field names the document ("Purchase Order's Status")."""
+        if isinstance(node, ast.Attribute) and parent in self.env:
+            return _("%(document)s's %(field)s", document=self.env["ir.model"]._get(parent).name, field=field.string)
+        return field.string
+
+    @api.model
     def _model_forms(self, model):
         """The model's forms as this user gets them (groups and developer mode applied), the one they open first
         first: from the menus they see (Settings > Users opens the full user form; Odoo's default user form is a short
@@ -1234,7 +1308,6 @@ class AiAgentEngineChecks(models.AbstractModel):
         the tabs of its form with the labels shown there, and, for line models, the columns of the list they
         appear in on their parent's form ("Order Lines" on a sales order: ... Disc.%, Amount). Columns and fields
         that are optional or shown only in some cases say so in words, from the screen's own rules."""
-        Flow = self.env["ai_agent.business.flow"]
 
         def is_hidden(node):
             return any(str(node.get(attr) or "").strip() in ("1", "True", "true")
@@ -1250,7 +1323,7 @@ class AiAgentEngineChecks(models.AbstractModel):
             if rule in ("", "0", "False", "false", "1", "True", "true"):
                 return ""
             try:
-                words = Flow._words(model_name, ast.parse(rule, mode="eval").body, True, False, parent)
+                words = self._rule_words(model_name, ast.parse(rule, mode="eval").body, True, False, parent)
             except SyntaxError:
                 words = _("other conditions allow it")
             if not words:

@@ -88,23 +88,7 @@ The AI only learned *"12 invoices found"*. **Odoo** filled in the table.
 
 Nothing is saved until **you** click **Confirm**.
 
-### 4. Ask how your business works
-
-```
- 👤 You:       What happens after a quotation is confirmed, and who can confirm it?
-
- 🤖 AI Agent:  It becomes a Sales Order. A delivery is created for the warehouse, and the
-               order becomes ready to invoice. Any salesperson can confirm it, but in this
-               company an order with a discount above 20% needs a sales manager's approval first.
-```
-
-### 5. See every process on one page: the Business Flow menu
-
-<img src="static/description/screenshots/business_flow_list.png" alt="Business Flow list" width="900"/>
-
-<img src="static/description/screenshots/business_flow_sales.png" alt="Sales flow: stages, actions and who can do them" width="900"/>
-
-### 6. Understand an error in plain words
+### 4. Understand an error in plain words
 
 Odoo shows *"Order S00042 has a line with a discount above 20%…"* → click **Resolve with AI**:
 
@@ -337,8 +321,8 @@ Go to **Settings → Users**, open a user, and under **Access Rights → AI Agen
 
 | Access | They can |
 |---|---|
-| **User** | Chat with the AI and open Business Flow. |
-| **Administrator** | Everything above, plus the settings, everyone's usage and cost, and updating the business flow context. |
+| **User** | Chat with the AI. |
+| **Administrator** | Everything above, plus the settings and everyone's usage and cost. |
 
 > Users do **not** need the *MCP User* group. That group is only for connecting **outside** AI apps to Odoo ([section 8](#8-mcp-server-how-it-works-with-the-chatbot)).
 
@@ -348,24 +332,9 @@ Go to **Settings → Users**, open a user, and under **Access Rights → AI Agen
 |---|---|---|
 | **Share record values with the AI provider** | **Off** ✅ recommended | When on, record values are also sent so the AI can summarise them in its own words. |
 | **Resolve errors with AI** | Off | Adds a **Resolve with AI** button to Odoo error messages. |
-| **Business flow context** | Off | Fills the **Business Flow** menu and lets the AI explain how *your* processes work ([see below](#-business-flow)). |
 | **Tool steps per answer** | 8 | How many lookups the AI may do for one answer (1–25). |
 | **Answer length** | 2,048 | The longest reply the AI may write, in tokens (256–65,536). |
 | **Provider timeout** | 60 seconds | How long to wait for the AI provider (10–600). |
-
-#### Switching on Business flow context
-
-1. Tick **Business flow context**.
-2. Read the short description under it. It tells you:
-   - **What it reads:** every installed app's documents, stages, buttons and access rights, plus the full code of your **own** custom modules, Studio changes and automation rules. Standard Odoo code and the Odoo documentation aren't copied, because the AI already knows them.
-   - **Tokens:** updating costs **nothing** (no AI is used). Each question about a flow sends a small amount of text, about 2,000 tokens.
-   - **Last updated:** when the context was last refreshed.
-3. Set **Update automatically every … days** (15 by default; 0 = only when you click the button).
-4. Click **Update context now**.
-
-> 💡 Click **Update context now** again after you deploy new or changed custom modules.
-
-<img src="static/description/screenshots/business_flow_settings.png" alt="Business flow context settings" width="900"/>
 
 ---
 
@@ -376,11 +345,10 @@ The **AI Agent** app on the Odoo home screen has these menus:
 ```
 AI Agent
 ├── 💬 (the chat)          ← opens when you click the app
-├── 🔀 Business Flow       ← every process in your Odoo, as a map
 ├── 📈 Reporting
 │   └── Usage & Cost       ← requests, tokens and money spent
 └── ⚙️ Configuration
-    └── Settings           ← provider, key, model, privacy, business flow
+    └── Settings           ← provider, key, model, privacy
 ```
 
 ### 💬 The chat
@@ -393,23 +361,6 @@ You can also chat from anywhere:
 
 At the **top right of the chat** you can change the **AI model** for that conversation.
 
-### 🔀 Business Flow
-
-A map of how work moves through your Odoo, built automatically from your own system. It's ready once an administrator has switched on **Business flow context** and clicked **Update context now**.
-
-The list shows each process (Sales, Purchase, Manufacturing, Inventory, Invoicing, Projects… plus your own custom ones). Open one to see:
-
-| Part | In simple words | Example |
-|---|---|---|
-| **Documents** | The journey, in order | Opportunity → Quotation → Delivery → Invoice → Payment |
-| **Stages** | Where a document is right now | Quotation → Quotation Sent → Sales Order → Cancelled |
-| **Actions** | The buttons that move it forward, when you can press them, and who may press them | **Confirm**: in Quotation or Quotation Sent, by Sales users |
-| **Custom rules** | Extra checks *your company* added in its own code | "A discount above 20% needs a sales manager's approval" |
-
-When a button depends on something other than the stage, it says so in plain words, for example *"Unlock: Any stage, when Locked"*.
-
-**Is this only for custom modules?** No. Standard Odoo apps appear too. Your custom modules **add** to the map: their rules appear under **Custom rules**, their buttons under **Actions**, and a new document type with stages becomes a new flow of its own.
-
 ### 📈 Reporting → Usage & Cost
 
 A dashboard of how the AI is used:
@@ -421,7 +372,7 @@ This menu is for AI Agent administrators only.
 
 ### ⚙️ Configuration → Settings
 
-All the settings from [section 3](#3-first-time-setup-in-order): AI provider, API key, model, MCP Server, data sharing, user access, Resolve with AI, Business flow context and limits.
+All the settings from [section 3](#3-first-time-setup-in-order): AI provider, API key, model, MCP Server, data sharing, user access, Resolve with AI and limits.
 
 ---
 
@@ -440,7 +391,6 @@ All the settings from [section 3](#3-first-time-setup-in-order): AI provider, AP
 | 🧮 **Calculations by Odoo** | Win rate, % change, averages: the AI writes the formula and **Odoo** works it out on the real numbers. |
 | ✏️ **Prepare changes, you confirm** | Create contacts, tasks and activities, or update records, always as a **preview** first. |
 | 🩺 **Resolve with AI** | Explains Odoo error messages: what happened, why, and what to do. Administrators also see which custom code raised it. **Continue in AI Agent** opens a chat about the error. |
-| 🔀 **Business flow answers** | *"What happens after a quotation is confirmed?"* answered from your own processes and rules. |
 | 🔎 **"Data used"** | Under every answer: the steps the AI took and what Odoo found, so you can check any answer. |
 
 ---
@@ -455,7 +405,6 @@ All the settings from [section 3](#3-first-time-setup-in-order): AI provider, AP
 | **Purchase** | *"Total purchases by vendor this month"* · *"Which purchase orders are waiting for a vendor bill?"* |
 | **Inventory** | *"How much stock of Mountain Bike MB-200 do we have?"* · *"What was scrapped this month?"* |
 | **Employees** | *"Bar chart of employees by department"* · *"Who joined this month?"* |
-| **Business flow** | *"What are the steps of our sales process from lead to payment?"* · *"Who can validate a receipt?"* · *"Are there special rules before confirming a sales order?"* |
 | **Settings** | *"Is Lock Confirmed Orders enabled?"* · *"Where do I turn on multi-currency?"* |
 | **History** | *"Who changed the price on S00042?"* · *"Show the conversation on this opportunity"* |
 | **Help** | *"How do I convert a lead into an opportunity?"* · *"Where do I find orders to invoice?"* |
@@ -471,9 +420,7 @@ All the settings from [section 3](#3-first-time-setup-in-order): AI provider, AP
 | Number of records found, and their IDs | ✅ sent | ✅ sent |
 | **Record values** (names, amounts, emails, notes…) | ❌ **never** | ✅ sent |
 | Passwords, API keys, tokens | ❌ never | ❌ never |
-| **Resolve with AI** (only when a user clicks it) | The error message and the related custom code | Also the record's values |
-| **Business flow** questions (when switched on) | Small excerpts of your custom code and flow steps | Same |
-| **Building** the Business Flow menu | ❌ nothing (no AI is used) | ❌ nothing |
+| **Resolve with AI** (only when a user clicks it) | The error message | Also the record's values |
 
 > ⚠️ **What you type is sent.** If you type personal details into a question (*"Jane Smith, phone 555…"*), that text goes to the AI provider. Ask by name or reference instead.
 
@@ -541,7 +488,7 @@ Think of MCP Server as a **counter clerk** between the AI and your database. The
 | **Read data** | `search_records`, `get_record`, `aggregate_records`, `list_record_attachments` | Find records, open one record, totals and counts per group, list attachments |
 | **Change data** (preview + Confirm) | `create_record(s)`, `update_record(s)`, delete and button tools | Prepare a change for the user to confirm |
 
-On top of these, AI Agent adds its own helper tools that also run inside Odoo with the user's rights: charts (`show_chart`), formulas (`calculate`), record history (`get_record_history`, `find_changes`), settings (`find_setting`), access rights (`user_access_rights`), opening screens (`show_app`), saved filters (`get_filters`), chatter statistics (`conversation_stats`) and business flow (`search_business_flow`).
+On top of these, AI Agent adds its own helper tools that also run inside Odoo with the user's rights: charts (`show_chart`), formulas (`calculate`), record history (`get_record_history`, `find_changes`), settings (`find_setting`), access rights (`user_access_rights`), opening screens (`show_app`), saved filters (`get_filters`), chatter statistics (`conversation_stats`).
 
 ### Cautions
 
@@ -616,8 +563,6 @@ C:\Odoo>venv\Scripts\activate
 
 **3.** In the browser, press **Ctrl + Shift + R** to reload.
 
-**4.** If you use Business flow context, click **Update context now** in Settings.
-
 > 💡 Instead of the `-u odoo_ai_agent` line, you can start Odoo normally and go to **Apps** → search **AI Agent** → **⋮** → **Upgrade**.
 
 ---
@@ -644,8 +589,6 @@ C:\Odoo>venv\Scripts\activate
 | **"You don't have access to…"** | Working as intended: your Odoo rights don't allow it. |
 | **A user can't see AI Agent** | Give them **Access Rights → AI Agent → User**. |
 | **No "Resolve with AI" button** | Switch on **Resolve errors with AI**, then refresh the browser. |
-| **Business Flow is empty** | Switch on **Business flow context** and click **Update context now**. |
-| **Business Flow doesn't show my new custom module** | Click **Update context now** after deploying it. |
 | **Answers are slow or time out** | Raise **Provider timeout**, choose a faster model, or ask a narrower question. |
 | **An answer looks wrong** | Check the table under the answer (that's Odoo's real data) and **Data used**. Ask again more precisely, or try a stronger model. |
 | **Code changes don't show** | Stop Odoo, run the upgrade line from [section 11](#11-updating-to-a-new-version), start Odoo, and press Ctrl + Shift + R. |
