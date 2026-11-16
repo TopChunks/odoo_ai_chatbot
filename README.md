@@ -172,12 +172,14 @@ git --version
 ```bat
 mkdir C:\Odoo\custom-addons
 cd /d C:\Odoo\custom-addons
-git init
-git remote add origin https://github.com/TopChunks/odoo_ai_chatbot.git
-git pull origin main
+git clone https://github.com/TopChunks/odoo_ai_chatbot.git odoo_ai_agent
 ```
 
 You now have the folder `C:\Odoo\custom-addons\odoo_ai_agent\`.
+
+> ⚠️ Keep the folder name **`odoo_ai_agent`** (the last word of the `git clone` line): Odoo uses the folder name as the module's name.
+
+> 💡 The version with the **Business Flow** menu is on its own branch: use `git clone -b business-flow https://github.com/TopChunks/odoo_ai_chatbot.git odoo_ai_agent` instead.
 
 ### Step 3: Add the MCP Server module
 
@@ -263,11 +265,11 @@ C:\Users\YourName>cd..
 
 C:\Users>cd..
 
-C:\>cd Odoo\custom-addons
+C:\>cd Odoo\custom-addons\odoo_ai_agent
 
-C:\Odoo\custom-addons>git pull origin main
+C:\Odoo\custom-addons\odoo_ai_agent>git pull
 
-C:\Odoo\custom-addons>cd ..
+C:\Odoo\custom-addons\odoo_ai_agent>cd ..\..
 
 C:\Odoo>venv\Scripts\activate
 
@@ -280,7 +282,7 @@ C:\Odoo>venv\Scripts\activate
 
 | Command | What it does |
 |---|---|
-| `git pull origin main` | Makes sure you have the latest version of AI Agent |
+| `git pull` | Makes sure you have the latest version of AI Agent (of the branch you cloned) |
 | `python odoo-bin … -i odoo_ai_agent --stop-after-init` | **Installs** AI Agent (and MCP Server with it) in your database, then stops by itself |
 | `python odoo-bin -c C:\Odoo\odoo.conf` | Starts Odoo normally again |
 
@@ -591,11 +593,11 @@ C:\Users\YourName>cd..
 
 C:\Users>cd..
 
-C:\>cd Odoo\custom-addons
+C:\>cd Odoo\custom-addons\odoo_ai_agent
 
-C:\Odoo\custom-addons>git pull origin main
+C:\Odoo\custom-addons\odoo_ai_agent>git pull
 
-C:\Odoo\custom-addons>cd ..
+C:\Odoo\custom-addons\odoo_ai_agent>cd ..\..
 
 C:\Odoo>venv\Scripts\activate
 
@@ -608,7 +610,7 @@ C:\Odoo>venv\Scripts\activate
 
 | Command | What it does |
 |---|---|
-| `git pull origin main` | Downloads the new version of AI Agent |
+| `git pull` | Downloads the new version of AI Agent (of the branch you cloned) |
 | `python odoo-bin … -u odoo_ai_agent --stop-after-init` | **Upgrades** AI Agent in your database, then stops by itself |
 | `python odoo-bin -c C:\Odoo\odoo.conf` | Starts Odoo normally again |
 
