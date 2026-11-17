@@ -571,6 +571,7 @@ class AiAgentEngineRead(models.AbstractModel):
         mixed = self._mixed_currencies(state, list({
             tuple(value) for record in currencies.values() for name, value in record.items()
             if name in money_fields and value}), summed=False)
+        self._distinct_names(model, columns, rows)
         ref = self._ai_add_result(state, {
             "type": "table",
             "id": uuid.uuid4().hex,
@@ -743,6 +744,26 @@ class AiAgentEngineRead(models.AbstractModel):
         return (f" Several rows have the same name; Odoo added a Role column to tell them apart ({described}). Use the "
                 "one that fits the question (e.g. the customer with invoices for what someone owes); ask only if "
                 "more than one fits, naming them by role, not by ID.")
+
+    @api.model
+    def _distinct_names(self, model, columns, rows):
+        """Rows sharing a name that are different records by Odoo's full name (product variants "Widget Pro (Blue)"
+        and "Widget Pro (Black)", child contacts "Company, Person"): show the full name, as Odoo's own lists do,
+        instead of identical rows that look like duplicates."""
+        rec_name = self.env[model]._rec_name
+        if not rows or rec_name not in {c["name"] for c in columns}:
+            return
+        by_name = {}
+        for row in rows:
+            if row.get("id") and isinstance(row.get(rec_name), str):
+                by_name.setdefault(row[rec_name], []).append(row)
+        shared = [row for group in by_name.values() if len(group) > 1 for row in group]
+        if not shared:
+            return
+        full = {r.id: r.display_name for r in self.env[model].browse([row["id"] for row in shared]).exists()}
+        for row in shared:
+            if full.get(row["id"]):
+                row[rec_name] = full[row["id"]]
 
     @api.model
     def _duplicate_rows(self, model, columns, rows, state):

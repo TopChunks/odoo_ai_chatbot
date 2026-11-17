@@ -82,9 +82,41 @@ class AiAgentEngineWrite(models.AbstractModel):
             "status": "pending",
             "expires": fields.Datetime.to_string(fields.Datetime.now() + ACTION_TTL),
         }
+        # A corrected proposal (same tool, model and records) replaces the earlier preview of this answer.
+        target = json.dumps([name, model, arguments.get("record_id"), arguments.get("record_ids"),
+                             arguments.get("method")], default=str)
+        state["blocks"] = [b for b in state["blocks"] if not (
+            b.get("type") == "action" and b.get("status") == "pending" and json.dumps(
+                [b.get("tool"), b.get("model"), b["arguments"].get("record_id"), b["arguments"].get("record_ids"),
+                 b["arguments"].get("method")], default=str) == target)]
         state["blocks"].append(block)
+        options = self._preview_option_check(model, arguments) if model else ""
         return ("PREVIEW SHOWN, NOT APPLIED: the user now sees this change with Confirm and Cancel buttons. Tell the "
-                "user briefly what will happen and ask them to confirm. Do not propose it again.")
+                "user briefly what will happen and ask them to confirm. Do not propose it again." + options)
+
+    @api.model
+    def _preview_option_check(self, model, arguments):
+        """The option labels the preview shows for the codes the AI chose ('3' is 'Very High', not 'High'), so the
+        AI describes them with the preview's words and corrects a wrong code instead of misdescribing it."""
+        values = arguments.get("values")
+        rows = [values] if isinstance(values, dict) else []
+        for key in ("records", "updates"):
+            rows += [r.get("values", r) for r in arguments.get(key) or [] if isinstance(r, dict)]
+        Model, found = self.env[model], {}
+        for row in rows:
+            for name, value in (row or {}).items():
+                field = Model._fields.get(name)
+                if field is not None and field.type == "selection" and isinstance(value, str):
+                    options = field._description_selection(self.env)
+                    labels = dict(options)
+                    if value in labels:
+                        found[name] = (field.string, labels[value], [label for _key, label in options])
+        if not found:
+            return ""
+        return (" The preview shows these options: " + "; ".join(
+            f"{label} = '{chosen}' (options: {', '.join(choices)})" for label, chosen, choices in found.values())
+            + ". Use exactly these words. If one is not what the user asked for, call the same tool again now with "
+              "the right value (it replaces this preview) instead of describing it differently.")
 
     @api.model
     def _preview_value(self, value):
@@ -117,8 +149,34 @@ class AiAgentEngineWrite(models.AbstractModel):
             elif info["type"] in ("many2many", "one2many") and isinstance(value, list) and info.get("relation") \
                     and all(isinstance(v, int) for v in value):
                 shown = ", ".join(self.env[info["relation"]].browse(value).exists().mapped("display_name"))
+            elif info["type"] == "many2many" and isinstance(value, list) and info.get("relation"):
+                shown = self._preview_commands(info["relation"], value)
             lines.append({"label": info.get("string") or field, "value": self._preview_value(shown)})
         return lines
+
+    @api.model
+    def _preview_commands(self, relation, commands):
+        """Odoo's list commands ([[6, 0, ids]], [[4, id]], [[3, id]]) as names: "Black, Red, Blue", "add Red"."""
+        Related, parts = self.env[relation], []
+
+        def names(ids):
+            return ", ".join(Related.browse([i for i in ids if isinstance(i, int)]).exists().mapped("display_name"))
+
+        for command in commands:
+            if not isinstance(command, (list, tuple)) or not command or command[0] not in (3, 4, 5, 6):
+                return commands  # anything else is shown as sent
+            code = command[0]
+            if code == 6 and len(command) > 2 and isinstance(command[2], list):
+                parts.append(names(command[2]) or _("(none)"))
+            elif code == 4 and len(command) > 1:
+                parts.append(_("add %s", names([command[1]])))
+            elif code == 3 and len(command) > 1:
+                parts.append(_("remove %s", names([command[1]])))
+            elif code == 5:
+                parts.append(_("remove all"))
+            else:
+                return commands
+        return "; ".join(parts)
 
     @api.model
     def _preview_records(self, model, ids):
