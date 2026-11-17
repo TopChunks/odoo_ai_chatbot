@@ -146,7 +146,8 @@ class AiAgentEnginePresent(models.AbstractModel):
         if not isinstance(inputs, dict) or not inputs:
             raise UserError(_("inputs needs at least one variable, e.g. {\"won\": \"r1.__count\"}."))
         for name in inputs:
-            if not isinstance(name, str) or not name.isidentifier() or name in formulas.FUNCTIONS or name == "today":
+            reserved = name == "today" or name in formulas.FUNCTIONS or name in formulas.TODAY_FUNCTIONS
+            if not isinstance(name, str) or not name.isidentifier() or reserved:
                 raise UserError(_("%s cannot be used as a variable name.", name))
         try:
             tree = formulas.parse(formula, set(inputs))

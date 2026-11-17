@@ -216,8 +216,11 @@ CALCULATE_SCHEMA = {
         "formula": {
             "type": "string",
             "description": "One Python expression over the inputs: numbers, + - * / // % **, comparisons, and/or/"
-            "not, x if c else y, min, max, sum, avg, len, abs, round, days(later, earlier); 'today' is today's "
-            "date. E.g. 'won / (won + lost) * 100', 'on_hand < min_qty', 'days(today, due_date)'.",
+            "not, x if c else y, min, max, sum, avg, len, abs, round, days(later, earlier), years(later, earlier) "
+            "(whole years), year(d), month(d), day(d), days_to_anniversary(d) (days until the date's next yearly "
+            "return: birthdays, work anniversaries, renewals; 0 = today); 'today' is today's date. E.g. "
+            "'won / (won + lost) * 100', 'on_hand < min_qty', 'days(today, due_date)', "
+            "'days_to_anniversary(start) <= 30 and years(today, start) >= 1'.",
         },
         "label": {"type": "string", "description": "Name of the computed column or figure, in the user's language, "
                   "e.g. 'Win rate (%)'."},

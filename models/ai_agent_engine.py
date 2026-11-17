@@ -55,6 +55,16 @@ class AiAgentEngine(models.AbstractModel):
     _name = "ai_agent.engine"
     _description = "AI Agent Engine"
 
+    def _register_hook(self):
+        """At every start: enable the default MCP models of apps installed since, and new defaults."""
+        super()._register_hook()
+        from ..hooks import offer_default_models  # noqa: PLC0415 (hooks imports nothing from models)
+        try:
+            with self.env.cr.savepoint():
+                offer_default_models(self.env)
+        except Exception:  # noqa: BLE001 - never block Odoo from starting (e.g. two workers at once)
+            _logger.warning("AI Agent: could not offer the default MCP models.", exc_info=True)
+
     # ------------------------------------------------------------------
     # Configuration
     # ------------------------------------------------------------------
@@ -512,6 +522,9 @@ class AiAgentEngine(models.AbstractModel):
                 "read it: show the record and say in one sentence that an administrator can turn on \"Share record "
                 "values with the AI provider\" in AI Agent settings for that.\n"
                 "- Never ask the user to paste data you could look up.\n"
+                "- A verdict such as \"none\", \"no one\", \"all of them\" or \"the only one\" needs a filter (or "
+                "calculate mode filter) that decides it, so its count is the answer; never draw it from rows whose "
+                "values you cannot see.\n"
                 "- \"Explain that simply\" about a status shown: explain in plain words what each status of that "
                 "document means (get_fields gives its labels, e.g. a delivery's Ready means the goods are reserved "
                 "and can be shipped). Say which one applies only if you checked it with a filter.\n"
@@ -566,6 +579,13 @@ HOW TO USE THE TOOLS
 - Private details of people (salary or wage, bank account, home address, date of birth, ID or passport numbers, emergency contact) are protected by Odoo's access rights. Try to read the requested field right away for all matching records; if Odoo refuses, say that the user has no access to it. Never ask which person first, and never promise to look it up later.
 - For the details of one order, invoice or bill that was found, also show its lines (never when the record was not found): search_records on the line model filtered by the parent record (product, quantity, unit price, subtotal).
 - Results only contain records the user may access. When nothing is found, say that nothing was found among the records the user can access; never state that records do not exist.
+- Before saying nothing was found, check that the condition was looked for where Odoo keeps it. A team, department or group the user names ("Marketing team", "design team", "Engineering") may be a tag, an employee department, a sales team, a project or a stage, depending on the model: search those by that name, then run the question with each match on the field that links it (tag_ids, user_ids.employee_ids.department_id, team_id, project_id). Answer with the match that finds records and say in a few words which one you used; ask which one only when several matches find different records.
+- Tasks blocked by or waiting on other tasks: project.task whose depend_on_ids (the tasks it waits for) are still open; Odoo gives them the state 04_waiting_normal. "Waiting on X" filters on those tasks: depend_on_ids.tag_ids, depend_on_ids.user_ids, depend_on_ids.project_id.
+- Before saying Odoo does not record or track something (onboarding, approvals, follow-ups, checklists), check whether it is kept as activities on those records: mail.activity with that res_model, filtered on the user's word in the summary or activity type (["summary", "ilike", "onboarding"]); Odoo's onboarding and offboarding plans create activities on employees, and open activities mean not completed. Show only activities matching the word; list all open activities only if none match, and say so.
+- Yearly dates (birthdays, work anniversaries, renewals): search the records with the date column (an employee's work start is contract_date_start on hr.employee; never use create_date, the day the record was entered), then calculate mode filter with days_to_anniversary(date), e.g. 'days_to_anniversary(start) <= 30 and years(today, start) >= 1', and present the kept rows; never decide it from dates grouped by month or year.
+- An amount the user gives with a currency (€5,000, $1,000, ₹50,000) when the records are in another currency: compare in the records' currency and say so in one short sentence; never convert amounts yourself.
+- Setting a product's stock to a quantity ("update stock of X to 500") is an inventory count: update inventory_quantity on its stock.quant in the location (one per location; ask which if several), then propose call_model_method action_apply_inventory on the same quant, so both previews show and the count is applied after the user confirms them in order.
+- Stock questions about products (stock levels, movements or no movement, reordering, slow or dead stock) concern only products whose stock Odoo tracks (is_storable = true): leave services and untracked goods out and say so in a few words.
 
 PRESENTING THE ANSWER
 - Every data result is named [r1], [r2], ... and is NOT shown to the user by itself.

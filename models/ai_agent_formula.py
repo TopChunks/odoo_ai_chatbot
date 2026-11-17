@@ -35,6 +35,29 @@ def _days(later, earlier):
     return (_date(later) - _date(earlier)).days
 
 
+def _same_day_in(year, start):
+    """start's month and day in another year (29 February becomes 28 February in other years)."""
+    try:
+        return start.replace(year=year)
+    except ValueError:
+        return start.replace(year=year, day=28)
+
+
+def _days_to_anniversary(start, today):
+    """Days until the next yearly return of a date (birthday, work anniversary, renewal); 0 when it is today."""
+    start, today = _date(start), _date(today)
+    upcoming = _same_day_in(today.year, start)
+    if upcoming < today:
+        upcoming = _same_day_in(today.year + 1, start)
+    return (upcoming - today).days
+
+
+def _years(later, earlier):
+    """Whole years from earlier to later (age, years of service)."""
+    later, earlier = _date(later), _date(earlier)
+    return later.year - earlier.year - ((later.month, later.day) < (earlier.month, earlier.day))
+
+
 def _numbers(values):
     return [v for v in values if isinstance(v, (int, float)) and not isinstance(v, bool)]
 
@@ -53,7 +76,13 @@ FUNCTIONS = {
     "abs": abs,
     "round": lambda value, digits=0: round(value, int(digits)),
     "days": _days,
+    "years": _years,
+    "year": lambda value: _date(value).year,
+    "month": lambda value: _date(value).month,
+    "day": lambda value: _date(value).day,
 }
+# Functions that also need today's date (added by evaluate): days_to_anniversary(date).
+TODAY_FUNCTIONS = {"days_to_anniversary": _days_to_anniversary}
 
 _BINARY = {
     ast.Add: lambda a, b: a + b,
@@ -93,9 +122,11 @@ def parse(formula, names):
         if not isinstance(node, allowed):
             raise FormulaError(f"'{type(node).__name__}' is not allowed in a formula.")
         if isinstance(node, ast.Call):
-            if not isinstance(node.func, ast.Name) or node.func.id not in FUNCTIONS or node.keywords:
-                raise FormulaError("Only these functions are allowed: " + ", ".join(sorted(FUNCTIONS)) + ".")
-        elif isinstance(node, ast.Name) and node.id not in names and node.id not in FUNCTIONS and node.id != "today":
+            known = {**FUNCTIONS, **TODAY_FUNCTIONS}
+            if not isinstance(node.func, ast.Name) or node.func.id not in known or node.keywords:
+                raise FormulaError("Only these functions are allowed: " + ", ".join(sorted(known)) + ".")
+        elif isinstance(node, ast.Name) and node.id not in names and node.id != "today" \
+                and node.id not in FUNCTIONS and node.id not in TODAY_FUNCTIONS:
             raise FormulaError(f"Unknown name '{node.id}'. Use only the inputs: " + ", ".join(sorted(names)) + ".")
         elif isinstance(node, ast.Constant) and not isinstance(node.value, (int, float, str, bool, type(None))):
             raise FormulaError("Only numbers, text, True, False and None are allowed as constants.")
@@ -160,6 +191,8 @@ def evaluate(tree, values, today=None):
             if any(argument is None for argument in arguments):
                 return None
             try:
+                if node.func.id in TODAY_FUNCTIONS:
+                    return TODAY_FUNCTIONS[node.func.id](*arguments, scope["today"])
                 return FUNCTIONS[node.func.id](*arguments)
             except FormulaError:
                 return None  # e.g. days() on a row whose date is empty
